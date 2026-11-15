@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; padding: 16px; background: #EDE0C0; }
+  .b4-wrap {
+    max-width: 600px;
+    margin: 0 auto;
+    background: #F5EDD8;
+    color: #1A1208;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    border: 1px solid #D4B98A;
+    position: relative;
+    overflow: hidden;
+  }
+  .pigeons-global {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .b4-header {
+    padding: 24px 32px 0;
+    background: #EDE0C0;
+    position: relative;
+  }
+  .b4-eyebrow {
+    font-family: 'Courier Prime', monospace;
+    font-size: 8.5px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #8A6A3A;
+    margin-bottom: 8px;
+    position: relative;
+    z-index: 1;
+    display: flex;
+    justify-content: space-between;
+  }
+  .b4-title-row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    position: relative;
+    z-index: 1;
+  }
+  .b4-title {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-weight: 300;
+    font-style: italic;
+    font-size: 58px;
+    line-height: 0.9;
+    color: #1A1208;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .b4-title em { color: #9B3A1A; font-style: normal; }
+  .b4-date {
+    font-family: 'Courier Prime', monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.14em;
+    color: #8A6A3A;
+    line-height: 1.9;
+    text-transform: uppercase;
+    text-align: right;
+    position: relative;
+    z-index: 1;
+  }
+  .b4-rule { width: 32px; height: 2px; background: #9B3A1A; margin: 10px 0 0; position: relative; z-index: 1; }
+  .b4-header-bottom-rule { height: 1px; background: #C4A46A; margin-top: 12px; position: relative; z-index: 1; }
+  .b4-body { padding: 0 32px 28px; position: relative; z-index: 1; }
+  .b4-section { padding: 20px 0 18px; border-bottom: 1px solid #D4B98A; }
+  .b4-section:last-child { border-bottom: none; }
+  .b4-label-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .b4-label { font-family: 'Courier Prime', monospace; font-size: 8px; letter-spacing: 0.26em; text-transform: uppercase; color: #9B3A1A; white-space: nowrap; }
+  .b4-label-rule { flex: 1; height: 1px; background: #D4B98A; }
+  .b4-label-roman { font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-size: 12px; color: #B89A5A; }
+  .b4-section p { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 16.5px; line-height: 1.72; color: #2A1E0A; margin: 0 0 12px; font-weight: 400; }
+  .b4-section p:last-child { margin-bottom: 0; }
+  .b4-section a { color: #9B3A1A; }
+  .news-feed { display: flex; flex-direction: column; gap: 0; }
+  .news-item + .news-item { border-top: 1px solid #D4B98A; padding-top: 16px; margin-top: 4px; }
+  .mta-banner { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 16px; line-height: 1.6; color: #2A1E0A; margin: 0 0 16px; padding: 12px 16px; background: #EFE3C3; overflow-wrap: break-word; word-break: break-word; }
+  .mta-banner strong { color: #9B3A1A; font-weight: 600; }
+  .mta-banner--clear { border-left: 3px solid #C4A46A; }
+  .mta-banner--alert { border-left: 3px solid #9B3A1A; }
+  .mta-group { margin-bottom: 20px; }
+  .mta-group:last-child { margin-bottom: 0; }
+  .mta-group-label { font-family: 'Courier Prime', monospace; font-size: 8px; letter-spacing: 0.22em; text-transform: uppercase; color: #9B3A1A; margin-bottom: 12px; }
+  .news-item { padding: 12px 0 16px 14px; border-left: 2px solid #9B3A1A; margin-bottom: 16px; }
+  .news-item:last-child { margin-bottom: 0; }
+  .news-subhead { font-family: 'Courier Prime', monospace; font-size: 8px; letter-spacing: 0.26em; text-transform: uppercase; color: #9B3A1A; margin: 8px 0 14px; padding-top: 16px; border-top: 1px solid #D4B98A; }
+  .news-source { font-family: 'Courier Prime', monospace; font-size: 8px; letter-spacing: 0.22em; text-transform: uppercase; color: #B89A5A; margin-bottom: 8px; }
+  .news-headline-row { margin-bottom: 8px; }
+  .news-headline-row:last-child { margin-bottom: 0; }
+  .news-hed { font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 600; font-size: 15px; line-height: 1.3; color: #1A1208; margin-bottom: 5px; overflow-wrap: break-word; word-break: break-word; }
+  .news-hed a { color: #1A1208; text-decoration: none; border-bottom: 1px solid #D4B98A; }
+  .news-dek { font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-size: 13.5px; color: #6A5030; line-height: 1.55; }
+  .b4-footer {
+    background: #1A1208;
+    padding: 16px 32px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    z-index: 1;
+  }
+  .b4-footer-left { display: flex; flex-direction: column; gap: 3px; }
+  .b4-crest { display: block; width: 88px; height: 88px; flex: none; margin-left: 16px; }
+  @media (max-width: 520px) { .b4-crest { width: 64px; height: 64px; } }
+  .b4-footer-eyebrow { font-family: 'Courier Prime', monospace; font-size: 7.5px; letter-spacing: 0.16em; text-transform: uppercase; color: #9B8A5A; }
+  .b4-signature { font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-size: 20px; color: #D4B98A; line-height: 1; margin-top: 2px; }
+  .b4-tagline { font-family: 'Courier Prime', monospace; font-size: 7px; letter-spacing: 0.04em; text-transform: uppercase; color: #9B8A5A; margin-top: 2px; white-space: nowrap; }
+
+  .xs-hed { font-family:'Cormorant Garamond',Georgia,serif; font-weight:600; font-size:21px; line-height:1.2; color:#1A1208; margin:0 0 10px; }
+  .xs-hed + .xs-sub { margin-top:-8px; }
+  .xs-sub { font-family:'Cormorant Garamond',Georgia,serif; font-style:italic; font-size:15px; color:#6A5030; margin:0 0 12px; }
+  .xs-photo { margin:0 0 14px; }
+  .xs-photo img { display:block; width:100%; height:auto; border:1px solid #D4B98A; }
+  .xs-photo figcaption { font-family:'Courier Prime',monospace; font-size:7.5px; letter-spacing:.1em; text-transform:uppercase; color:#B89A5A; margin-top:6px; line-height:1.5; }
+  .xs-audio { margin:0 0 16px; padding:10px 12px; background:#EFE3C3; border-left:3px solid #C4A46A; }
+  .xs-audio-label { font-family:'Cormorant Garamond',Georgia,serif; font-style:italic; font-size:15px; color:#3A2A10; margin-bottom:8px; }
+  .xs-audio audio { display:block; width:100%; }
+  .xs-audio figcaption { font-family:'Courier Prime',monospace; font-size:7.5px; letter-spacing:.1em; text-transform:uppercase; color:#B89A5A; margin-top:6px; line-height:1.5; }
+  .xs-kv { display:grid; grid-template-columns:92px 1fr; gap:6px 14px; margin:0 0 14px; }
+  .xs-kv dt { font-family:'Courier Prime',monospace; font-size:8px; letter-spacing:.2em; text-transform:uppercase; color:#9B3A1A; padding-top:5px; }
+  .xs-kv dd { margin:0; font-family:'Cormorant Garamond',Georgia,serif; font-size:16px; line-height:1.55; color:#2A1E0A; }
+  .xs-box { background:#EFE3C3; border-left:3px solid #C4A46A; padding:12px 16px; margin:4px 0 12px; }
+  .xs-box-label { font-family:'Courier Prime',monospace; font-size:8px; letter-spacing:.22em; text-transform:uppercase; color:#9B3A1A; margin-bottom:6px; }
+  .b4-section .xs-box p { font-size:15.5px; line-height:1.6; margin:0; }
+  .mw-fig { margin:0 0 12px; border:1px solid #D4B98A; }
+  .mw-legend { display:flex; flex-wrap:wrap; gap:6px 14px; padding:8px 10px; border-top:1px solid #D4B98A; font-family:'Courier Prime',monospace; font-size:8.5px; letter-spacing:.06em; color:#5C4422; }
+  .mw-key i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; vertical-align:-1px; }
+  .xs-cols { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:0 0 4px; }
+  .xs-col-label { font-family:'Courier Prime',monospace; font-size:8px; letter-spacing:.22em; text-transform:uppercase; color:#9B3A1A; margin-bottom:6px; }
+  .b4-section .xs-cols p { font-size:15.5px; line-height:1.6; }
+  .xs-sign { font-family:'Courier Prime',monospace; font-size:8px; letter-spacing:.18em; text-transform:uppercase; color:#B89A5A; margin-top:10px; }
+  .mw-key i.star { background:none; width:auto; height:auto; color:#B8923E; font-style:normal; font-size:11px; border-radius:0; }
+  .bt-list { list-style:none; margin:0; padding:0; }
+  .bt-list li { display:flex; gap:10px; align-items:flex-start; font-family:'Cormorant Garamond',Georgia,serif; font-size:15.5px; line-height:1.45; color:#2A1E0A; padding:6px 0; border-bottom:1px solid #E0CCA4; }
+  .bt-list li:last-child { border-bottom:none; }
+  .bt-n { flex:none; width:20px; height:20px; border-radius:50%; background:#1A1208; color:#FFF3C4; font-family:'Courier Prime',monospace; font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center; margin-top:2px; }
+  .bt-meta { font-size:13.5px; color:#6A5030; }
+  .sl-dash { background:#1E2B3A; color:#F5EDD8; padding:14px 16px 12px; margin:0 0 18px; }
+  .sl-k { font-family:'Courier Prime',monospace; font-size:8.5px; letter-spacing:.24em; text-transform:uppercase; color:#9EC3D6; margin-bottom:8px; }
+  .sl-gauges { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; text-align:center; margin-bottom:10px; }
+  .sl-cap { font-family:'Cormorant Garamond',Georgia,serif; font-size:13px; font-style:italic; color:#C9D8DF; line-height:1.35; margin-top:4px; }
+  .sl-cap-hed { font-style:normal; font-size:15px; color:#F5EDD8; }
+  .sl-times { font-family:'Cormorant Garamond',Georgia,serif; font-size:14px; line-height:1.55; color:#EAF0F2; margin-top:8px; }
+  .sl-times b { font-family:'Courier Prime',monospace; font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:#9EC3D6; font-weight:400; margin-right:4px; }
+  .sl-src { font-family:'Courier Prime',monospace; font-size:7px; letter-spacing:.08em; color:#8FA9B6; margin-top:8px; line-height:1.5; }
+  .sl-kicker { font-family:'Courier Prime',monospace; font-size:8px; letter-spacing:.22em; text-transform:uppercase; color:#3F6A86; margin:0 0 6px; }
+  @media (max-width:520px) { .sl-gauges { grid-template-columns:1fr 1fr; } .xs-cols { grid-template-columns:1fr; } .xs-kv { grid-template-columns:1fr; } .xs-kv dt { padding-top:0; } }
+</style>
+</head>
+<body>
+<div class="b4-wrap">
+
+  <svg class="pigeons-global" viewBox="0 0 600 1500" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <image id="pp" href="../assets/pigeon-grey.png" width="60" height="52"/>
+    </defs>
+    
+    <use href="#pp" transform="translate(30,30) scale(0.55)" opacity="0.11"/>
+    <use href="#pp" transform="translate(185,20) scale(0.45)" opacity="0.10"/>
+    <use href="#pp" transform="translate(360,35) scale(0.6)" opacity="0.11"/>
+    <use href="#pp" transform="translate(510,15) scale(0.5)" opacity="0.10"/>
+    <use href="#pp" transform="translate(80,185) scale(0.5)" opacity="0.10"/>
+    <use href="#pp" transform="translate(270,195) scale(0.55)" opacity="0.11"/>
+    <use href="#pp" transform="translate(450,180) scale(0.45)" opacity="0.10"/>
+    <use href="#pp" transform="translate(20,345) scale(0.6)" opacity="0.11"/>
+    <use href="#pp" transform="translate(200,355) scale(0.48)" opacity="0.10"/>
+    <use href="#pp" transform="translate(390,340) scale(0.55)" opacity="0.11"/>
+    <use href="#pp" transform="translate(530,360) scale(0.44)" opacity="0.10"/>
+    <use href="#pp" transform="translate(100,510) scale(0.52)" opacity="0.10"/>
+    <use href="#pp" transform="translate(310,520) scale(0.58)" opacity="0.11"/>
+    <use href="#pp" transform="translate(480,505) scale(0.46)" opacity="0.10"/>
+    <use href="#pp" transform="translate(40,665) scale(0.56)" opacity="0.11"/>
+    <use href="#pp" transform="translate(230,675) scale(0.5)" opacity="0.10"/>
+    <use href="#pp" transform="translate(430,660) scale(0.54)" opacity="0.11"/>
+    <use href="#pp" transform="translate(545,680) scale(0.42)" opacity="0.10"/>
+    <use href="#pp" transform="translate(120,825) scale(0.53)" opacity="0.10"/>
+    <use href="#pp" transform="translate(340,835) scale(0.57)" opacity="0.11"/>
+    <use href="#pp" transform="translate(510,820) scale(0.47)" opacity="0.10"/>
+    <use href="#pp" transform="translate(25,985) scale(0.58)" opacity="0.11"/>
+    <use href="#pp" transform="translate(200,995) scale(0.5)" opacity="0.10"/>
+    <use href="#pp" transform="translate(390,980) scale(0.55)" opacity="0.11"/>
+    <use href="#pp" transform="translate(540,1000) scale(0.44)" opacity="0.10"/>
+    <use href="#pp" transform="translate(85,1140) scale(0.52)" opacity="0.10"/>
+    <use href="#pp" transform="translate(290,1150) scale(0.56)" opacity="0.11"/>
+    <use href="#pp" transform="translate(470,1135) scale(0.48)" opacity="0.10"/>
+    <use href="#pp" transform="translate(35,1295) scale(0.54)" opacity="0.11"/>
+    <use href="#pp" transform="translate(215,1305) scale(0.5)" opacity="0.10"/>
+    <use href="#pp" transform="translate(415,1290) scale(0.57)" opacity="0.11"/>
+    <use href="#pp" transform="translate(545,1310) scale(0.43)" opacity="0.10"/>
+    <use href="#pp" transform="translate(100,1430) scale(0.5)" opacity="0.09"/>
+    <use href="#pp" transform="translate(310,1435) scale(0.46)" opacity="0.09"/>
+    <use href="#pp" transform="translate(490,1425) scale(0.52)" opacity="0.09"/>
+  </svg>
+
+  <div class="b4-header">
+    <div class="b4-eyebrow">
+      <span>Weekend Dispatch</span>
+      <span>Fort Greene &middot; Brooklyn</span>
+    </div>
+    <div class="b4-title-row">
+      <h1 class="b4-title">The<br><em>Week</em>end.</h1>
+      <div class="b4-date">
+        Saturday<br>November 21<br>&mdash;&mdash;<br>Sunday<br>November 22<br>2026
+      </div>
+    </div>
+    <div class="b4-rule"></div>
+    <div class="b4-header-bottom-rule"></div>
+  </div>
+
+  <div class="b4-body">
+    
+        <div class="b4-section">
+          <div class="b4-label-row">
+            <span class="b4-label">MTA This Weekend</span>
+            <div class="b4-label-rule"></div>
+            <span class="b4-label-roman">i.</span>
+          </div>
+          <p class="mta-banner mta-banner--alert"><strong>Lafayette Av ([C])</strong>: Sample alert: Manhattan-bound C trains skip Lafayette Av, Sat 6am to Sun 10pm.. Nearest running alternative: Clinton–Washington Avs ([C], ~0.6 mi east).</p><p class="mta-banner mta-banner--alert"><strong>Fulton St ([G])</strong>: Sample alert: G trains run every 12 minutes all weekend for track work.. Nearest running alternative: Clinton–Washington Avs ([C], ~0.6 mi east).</p>
+          <div class="mta-group">
+            <div class="mta-group-label">Service changes on the C &amp; G</div>
+            <div class="news-feed">
+            <div class="news-item">
+              <div class="news-source">G line</div>
+              <div class="news-hed">Sample alert: G trains run every 12 minutes all weekend for track work.</div>
+            </div>
+            <div class="news-item">
+              <div class="news-source">C line</div>
+              <div class="news-hed">Sample alert: Manhattan-bound C trains skip Lafayette Av, Sat 6am to Sun 10pm.</div>
+            </div></div>
+          </div>
+        </div>
+        <div class="b4-section">
+          <div class="b4-label-row">
+            <span class="b4-label">Weather + Biscuit</span>
+            <div class="b4-label-rule"></div>
+            <span class="b4-label-roman">ii.</span>
+          </div>
+          <p>Sample text: a mild, mostly dry weekend. Saturday peaks near 61°F under high clouds, so the late-morning walk with Biscuit can run long. Sunday turns cloudier with a 30% chance of showers after 5pm; take the long walk before lunch.</p>
+        </div>
+        <div class="b4-section">
+          <div class="b4-label-row">
+            <span class="b4-label">Union Square Greenmarket</span>
+            <div class="b4-label-rule"></div>
+            <span class="b4-label-roman">iii.</span>
+          </div>
+          <p>Sample text: Go. Cool air and a dry window from 11am to 3:30pm make it an easy outing.</p>
+        </div>
+        <div class="b4-section">
+          <div class="b4-label-row">
+            <span class="b4-label">Sample Hall</span>
+            <div class="b4-label-rule"></div>
+            <span class="b4-label-roman">iv.</span>
+          </div>
+          <div class="news-feed">
+          <div class="news-item">
+            <div class="news-source">Sat 11.21 &middot; Club</div>
+            <div class="news-headline-row">
+              <div class="news-hed"><a href="https://example.com/sample-hall/">Sample DJ</a></div>
+              <div class='news-dek'>10:00 pm @ Main Room</div>
+            </div>
+          </div>
+          <div class="news-item">
+            <div class="news-source">Sun 11.22 &middot; Live</div>
+            <div class="news-headline-row">
+              <div class="news-hed"><a href="https://example.com/sample-hall/">Sample Band</a></div>
+              <div class='news-dek'>7:30 pm @ Garden</div>
+            </div>
+          </div></div>
+        </div>
+        <div class="b4-section">
+          <div class="b4-label-row">
+            <span class="b4-label">On Sale This Weekend</span>
+            <div class="b4-label-rule"></div>
+            <span class="b4-label-roman">v.</span>
+          </div>
+          <div class="news-feed"><p>Nothing on the watchlist for either night.</p>
+          <p style="margin-top:14px;"><a href="https://tharpez.github.io/weekend-dispatch/events.html?v=202611151645">The long list &mdash; every room, every night &rarr;</a></p></div>
+        </div>
+        <div class="b4-section">
+          <div class="b4-label-row">
+            <span class="b4-label">Around Brooklyn</span>
+            <div class="b4-label-rule"></div>
+            <span class="b4-label-roman">vi.</span>
+          </div>
+          <div class="news-feed">
+          <div class="news-item">
+            <div class="news-source">Sample Source</div>
+            
+              <div class="news-headline-row">
+                <div class="news-hed">A neighborhood park reopens</div>
+                <div class='news-dek'>Sample summary standing in for a Claude-written item.</div>
+              </div>
+          </div></div>
+        </div>
+    
+        <div class="b4-section">
+          <div class="b4-label-row">
+            <span class="b4-label">Bird of the Week</span>
+            <div class="b4-label-rule"></div>
+            <span class="b4-label-roman">vii.</span>
+          </div>
+
+          <div class="xs-hed">White-throated Sparrow</div>
+          <div class="xs-sub">Zonotrichia albicollis &mdash; The winter sparrow scratching through leaf litter under every park shrub</div>
+          
+          
+          <dl class="xs-kv"><dt>Where</dt><dd>On the ground under shrubs and along path edges in any park, often in loose flocks.</dd><dt>ID</dt><dd>A crisp white throat patch, a yellow spot between the eye and bill, and a striped crown. The stripes come in two forms, white-striped and tan-striped.</dd><dt>Voice</dt><dd>A thin whistled song, often written &ldquo;Oh sweet Canada, Canada, Canada.&rdquo;</dd><dt>Range</dt><dd>Breeds in Canada&rsquo;s boreal forest; winters across the eastern U.S., including NYC.</dd></dl>
+          <div class="xs-box">
+            <div class="xs-box-label">Conservation angle</div>
+            <p>Still common, but a frequent victim of window collisions during migration. It is also a genetics case study: the two stripe forms almost always pair with the opposite form.</p>
+          </div>
+        </div>
+        <div class="b4-section">
+          <div class="b4-label-row">
+            <span class="b4-label">Tree of the Week</span>
+            <div class="b4-label-rule"></div>
+            <span class="b4-label-roman">viii.</span>
+          </div>
+
+          <div class="xs-hed">Bigleaf Maple</div>
+          <div class="xs-sub">Acer macrophyllum &mdash; The maple with the biggest leaves in the world, and a garden of moss on every limb</div>
+          
+          
+          <dl class="xs-kv"><dt>Where</dt><dd>Moist valley bottoms and ravines across coastal B.C. and the Pacific Northwest.</dd><dt>Leaf</dt><dd>Deeply five-lobed and often wider than a dinner plate.</dd><dt>Epiphytes</dt><dd>Trunks and limbs are carpeted in moss and licorice fern, a canopy garden that can outweigh the tree&rsquo;s own leaves.</dd><dt>Seeds</dt><dd>Paired, hairy samaras held at a sharp angle.</dd></dl>
+          <div class="xs-box">
+            <div class="xs-box-label">Conservation angle</div>
+            <p>It enriches forest soils and streams; its leaves break down quickly and feed the food webs of salmon streams.</p>
+          </div>
+        </div>
+        <div class="b4-section">
+          <div class="b4-label-row">
+            <span class="b4-label">Then &amp; Now</span>
+            <div class="b4-label-rule"></div>
+            <span class="b4-label-roman">x.</span>
+          </div>
+
+          <div class="xs-hed">Gowanus was a creek before it was a canal</div>
+          <div class="xs-cols">
+            <div><div class="xs-col-label">Then</div><p><strong>Gowanus Creek</strong> was a tidal inlet winding through salt marsh, known for its oysters. In the Battle of Brooklyn in 1776, the Maryland troops&rsquo; stand near the Old Stone House held off the British long enough for American soldiers to retreat across the creek&rsquo;s marshes.</p></div>
+            <div><div class="xs-col-label">Now</div><p>The creek was dredged and bulkheaded into the <strong>Gowanus Canal</strong> in the mid-1800s and ringed with industry. It was designated an EPA <strong>Superfund</strong> site in 2010. Cleanup means dredging contaminated sediment and building tanks to capture combined sewer overflows.</p></div>
+          </div>
+        </div>
+        <div class="b4-section">
+          <div class="b4-label-row">
+            <span class="b4-label">Shore Leave</span>
+            <div class="b4-label-rule"></div>
+            <span class="b4-label-roman">xi.</span>
+          </div>
+
+          <div class="sl-kicker">Pacific Coast &middot; Forest &amp; Sea</div>
+          <div class="xs-hed">Southern Resident Killer Whales</div>
+          <div class="xs-sub"><em>Orcinus orca</em> &mdash; the J, K and L pods of the Salish Sea</div>
+          
+          <dl class="xs-kv"><dt>Who</dt><dd>Three family groups that spend much of the year in the waters between Vancouver Island, Vancouver and Seattle.</dd><dt>Diet</dt><dd>Specialists in salmon, above all Chinook, the largest salmon species.</dd><dt>Culture</dt><dd>Each pod has its own dialect of calls, passed down through the generations.</dd></dl><div class="xs-box"><div class="xs-box-label">Conservation angle</div><p>Listed as endangered in both Canada and the U.S., with fewer than 80 whales. Their three main threats are too little Chinook salmon, pollutants in the food web, and noise and disturbance from boats.</p></div>
+        </div>
+  </div>
+
+  <div class="b4-footer">
+    <div class="b4-footer-left">
+      <span class="b4-footer-eyebrow">Fort Greene &middot; Brooklyn, N.Y. &middot; 2026</span>
+      <span class="b4-signature">Alex Sample</span>
+      <span class="b4-tagline">A personal dispatch &mdash; written by machines, curated by instinct.</span>
+    </div>
+    <img class="b4-crest" src="../assets/crest-placeholder.png" width="88" height="88" alt="Dispatch crest">
+  </div>
+
+</div>
+</body>
+</html>

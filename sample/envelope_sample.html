@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light only">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Courier+Prime:wght@400;700&family=Special+Elite&display=swap" rel="stylesheet">
+<style>
+  :root { color-scheme: light only; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #2A1E0A !important;
+    margin: 0 !important;
+    padding: 32px 16px !important;
+    font-family: 'Cormorant Garamond', Georgia, serif !important;
+    -webkit-text-size-adjust: 100%;
+  }
+  .scene {
+    max-width: 620px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .pre-label {
+    font-family: 'Courier Prime', monospace;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #6A5030;
+    text-align: center;
+    margin-bottom: 22px;
+  }
+
+  /* ── ENVELOPE (realistic, pre-opened, single SVG) ── */
+  /* Shadow is a box-shadow on the img, not a CSS filter on the wrapper: iOS
+     Mail paints a filtered layer before the cid: image arrives and never
+     repaints it, so the envelope came through as blank space on iPhone. */
+  .env-wrap {
+    width: 100% !important;
+    position: relative;
+  }
+  .env-photo {
+    width: 100% !important;
+    height: auto !important;
+    display: block !important;
+    border-radius: 4px;
+    box-shadow: 0 22px 38px rgba(40,28,10,0.42), 0 4px 10px rgba(40,28,10,0.3);
+  }
+
+  /* ── NEWSLETTER PEEK (always visible below envelope) ── */
+  .newsletter-peek {
+    width: calc(100% - 48px) !important;
+    background: #F7F0DC !important;
+    border: 1px solid #D4B98A !important;
+    border-top: none !important;
+    padding: 22px 26px !important;
+    margin-top: -4px !important;
+    position: relative !important;
+    box-shadow: 0 14px 36px rgba(0,0,0,0.32) !important;
+  }
+  /* Force light mode — prevent Gmail dark mode inversion */
+  [data-ogsc] .newsletter-peek { background: #F7F0DC !important; color: #1A1208 !important; }
+  [data-ogsc] body { background: #2A1E0A !important; }
+  [data-ogsc] .peek-text { color: #2A1E0A !important; }
+  [data-ogsc] .peek-title { color: #1A1208 !important; }
+  [data-ogsc] .cta-btn { background: #1A1208 !important; color: #F5EDD8 !important; }
+  @media (prefers-color-scheme: dark) {
+    .newsletter-peek { background: #F7F0DC !important; color: #1A1208 !important; }
+    body { background: #2A1E0A !important; }
+    .peek-text { color: #2A1E0A !important; }
+    .peek-title { color: #1A1208 !important; }
+    .cta-btn { background: #1A1208 !important; color: #F5EDD8 !important; }
+  }
+
+  .peek-eyebrow {
+    font-family: 'Courier Prime', monospace;
+    font-size: 7.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #8A6A3A;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    overflow: hidden;
+  }
+  .peek-eyebrow span { min-width: 0; white-space: nowrap; overflow: hidden; }
+
+  .peek-title {
+    font-family: 'Special Elite', 'Courier Prime', 'Courier New', monospace;
+    font-weight: 400;
+    font-style: normal;
+    font-size: 46px;
+    line-height: 0.95;
+    letter-spacing: -0.01em;
+    color: #1A1208;
+    margin-top: 18px;
+    margin-bottom: 12px;
+  }
+  .peek-title em { color: #9B3A1A; font-style: normal; }
+
+  .peek-rule { height: 1px; background: #C4A46A; margin: 10px 0 14px; }
+
+  .peek-section-label {
+    font-family: 'Courier Prime', monospace;
+    font-size: 7.5px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #9B3A1A;
+    margin-bottom: 6px;
+  }
+
+  .peek-text {
+    font-family: 'Courier Prime', 'Courier New', monospace;
+    font-size: 13.5px;
+    line-height: 1.75;
+    color: #2A1E0A;
+    margin-bottom: 16px;
+  }
+
+  /* CTA button */
+  .cta-wrap {
+    text-align: center;
+    padding-top: 4px;
+  }
+
+  .cta-btn {
+    display: inline-block;
+    font-family: 'Courier Prime', monospace;
+    font-size: 9px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: #F5EDD8;
+    background: #1A1208;
+    text-decoration: none;
+    padding: 12px 28px;
+    border: 1px solid #3A2A10;
+  }
+
+  .bottom-note {
+    font-family: 'Courier Prime', monospace;
+    font-size: 8px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #3A2A10;
+    text-align: center;
+    margin-top: 22px;
+  }
+  a[x-apple-data-detectors] { color: inherit !important; text-decoration: none !important; font: inherit !important; }
+</style>
+</head>
+<body>
+<div class="scene">
+  <div class="pre-label">Your weekend dispatch has arrived</div>
+
+  <!-- Realistic envelope: single SVG. Flap folded back above body;
+       side + bottom panels fold to center; pressed wax seal at junction. -->
+  <div class="env-wrap">
+    <img class="env-photo" src="envelope_sample.jpg" width="620" height="393" alt="A cream envelope sealed with a wax seal, addressed to Alex Sample, with a Brooklyn pigeon stamp postmarked November 21, on a walnut desk">
+  </div>
+
+  <!-- Newsletter peek — always visible -->
+  <div class="newsletter-peek">
+    <div class="peek-eyebrow">
+      <span>Weekend Dispatch</span>
+      <span>Fort Greene &middot; Brooklyn</span>
+    </div>
+    <div class="peek-title">The<br><em>Week</em>end.</div>
+    <div class="peek-rule"></div>
+    <div class="peek-section-label">Saturday, November 21 &mdash; November 22 &middot; 2026</div>
+    <p class="peek-text">Your full dispatch is ready &mdash; weather &amp; Biscuit walk windows, the Greenmarket verdict, what&rsquo;s on at Sample Hall, what&rsquo;s on sale this weekend, what&rsquo;s going on around Brooklyn, this week&rsquo;s bird, tree and street-tree map, and the Rockaway tides.</p>
+    <div class="cta-wrap">
+      <a class="cta-btn" href="weekend_sample.html">&darr;&nbsp;&nbsp;Open Full Newsletter</a>
+    </div>
+  </div>
+
+  <div class="bottom-note">Weekend Dispatch &middot; Fort Greene &middot; 2026</div>
+</div>
+</body>
+</html>

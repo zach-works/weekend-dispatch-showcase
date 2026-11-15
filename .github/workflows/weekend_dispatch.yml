@@ -1,0 +1,38 @@
+name: Weekend Dispatch
+
+# SHOWCASE COPY: the schedule below is commented out, so this workflow never runs on its own.
+# It needs repo secrets (ANTHROPIC_API_KEY, DISPATCH_EMAIL, DISPATCH_APP_PASSWORD, DISPATCH_TO)
+# that this public repo does not have.
+on:
+  # schedule:   (disabled in the showcase copy)
+  #   # 1:15 AM Eastern Saturdays: 5:15 UTC in summer (EDT), 6:15 in winter (EST)
+  #   - cron: '15 5 * * 6'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      # Always build from the branch tip, so "Re-run all jobs" on an old run
+      # uses current code instead of the commit that run started on.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install anthropic requests beautifulsoup4 feedparser lxml pillow numpy
+
+      - name: Run weekend dispatch
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DISPATCH_EMAIL: ${{ secrets.DISPATCH_EMAIL }}
+          DISPATCH_APP_PASSWORD: ${{ secrets.DISPATCH_APP_PASSWORD }}
+          DISPATCH_TO: ${{ secrets.DISPATCH_TO }}
+          GITHUB_PAGES_URL: https://YOUR-ORG.github.io/weekend-dispatch-showcase/weekend.html
+        run: python weekend_dispatch.py
