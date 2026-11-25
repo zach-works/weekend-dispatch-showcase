@@ -1,0 +1,917 @@
+{
+  "_about": "Hand-vetted car-free day trips for the MTA Weekender section. Nothing here is written by a model: every ride time and train frequency was read from the MTA's published GTFS schedules (Saturday, December 2026 timetable) and every walking distance was estimated from the station's published coordinates (straight line x 1.3 for streets). A trip's main stops must be within about 3 miles on foot of the station and no taxi or bus leg is part of the plan. NJ Transit ride times are estimates: it publishes no open schedule. Edit freely; 'months' are the calendar months a trip is offered, 'fair_weather' trips are set aside when rain is likely, and each railroad contributes one trip per week in rotation.",
+  "trips": [
+    {
+      "id": "tarrytown",
+      "photo_wiki": "Sleepy Hollow Cemetery",
+      "photo_file": "Sleepy Hollow Cemetery North Gatehouse.jpg",
+      "station": "Tarrytown",
+      "railroad": "Metro-North",
+      "line": "Hudson Line",
+      "stop": "Tarrytown",
+      "route_ids": [
+        "1"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "Walk the Old Croton Aqueduct to Sleepy Hollow's old church and cemetery, from this river town on the Hudson",
+      "pitch": "A village of steep streets above the Hudson, where the Old Croton Aqueduct trail, the buried waterway that once carried the city's drinking water, runs straight through town. Walk it north to the Old Dutch Church and Sleepy Hollow Cemetery, where Washington Irving is buried. Lyndhurst, the Gothic Revival mansion, is on the hill south of the village, and the Tarrytown Music Hall is on Main Street.",
+      "ride": "About 50 minutes from Grand Central (the fastest trains take 39), with trains roughly twice an hour on weekends.",
+      "on_foot": "The Music Hall is a 10-minute walk, the Old Dutch Church about 1.3 miles and the cemetery about 1.9 miles. Lyndhurst is about 2 miles.",
+      "links": [
+        [
+          "Sleepy Hollow Cemetery",
+          "https://sleepyhollowcemetery.org/visiting/"
+        ],
+        [
+          "Lyndhurst",
+          "https://lyndhurst.org/"
+        ]
+      ]
+    },
+    {
+      "id": "beacon",
+      "photo_wiki": "Dia Beacon",
+      "photo_file": "Dia Beacon NY1.jpg",
+      "station": "Beacon",
+      "railroad": "Metro-North",
+      "line": "Hudson Line",
+      "stop": "Beacon",
+      "route_ids": [
+        "1"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "Spend the day with Dia Beacon's big, quiet rooms of postwar art, a 10-minute walk from the platform",
+      "pitch": "Dia Beacon fills a former Nabisco box-printing plant on the river with large-scale work from the 1960s on, including Richard Serra's steel ellipses and Dan Flavin's fluorescent light pieces. Afterwards walk Scenic Hudson's Long Dock Park on the water, then up the hill to Main Street's galleries and cafés.",
+      "ride": "About 90 minutes from Grand Central (the fastest trains take 87), with trains roughly hourly on weekends.",
+      "on_foot": "Dia is about a half mile from the station and Long Dock Park about the same. Main Street is a mile or so up the hill.",
+      "check": "Check Dia's opening days before you go.",
+      "links": [
+        [
+          "Dia Beacon",
+          "https://www.diaart.org/visit/visit/dia-beacon-beacon-new-york"
+        ],
+        [
+          "Long Dock Park",
+          "https://www.scenichudson.org/parks/long-dock-park/"
+        ]
+      ]
+    },
+    {
+      "id": "cold-spring",
+      "photo_wiki": "Cold Spring, New York",
+      "photo_file": "Cold Spring Waterfront.JPG",
+      "station": "Cold Spring",
+      "railroad": "Metro-North",
+      "line": "Hudson Line",
+      "stop": "Cold Spring",
+      "route_ids": [
+        "1"
+      ],
+      "months": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "fair_weather": true,
+      "headline": "Walk from the platform to antique shops, a Hudson waterfront and the edge of Hudson Highlands State Park",
+      "pitch": "A village that sits right on the river with the Highlands rising behind it. Main Street is a short walk of antique and book shops, Foundry Dock Park is steps from the station, and Little Stony Point, a small public park jutting into the Hudson, is about a mile north. Scenic Hudson's West Point Foundry Preserve, the site of the Civil War–era foundry that cast Parrott rifles, is a walk east of the village.",
+      "ride": "About 80 minutes from Grand Central (the fastest trains take 78), with trains roughly hourly on weekends.",
+      "on_foot": "Foundry Dock Park is 2 minutes from the station, Main Street about 5, and Little Stony Point about 20. The Highlands trails are steep: wear boots.",
+      "links": [
+        [
+          "West Point Foundry Preserve",
+          "https://www.scenichudson.org/parks/west-point-foundry-preserve/"
+        ],
+        [
+          "Hudson Highlands State Park Preserve",
+          "https://parks.ny.gov/visit/state-parks/hudson-highlands-state-park-preserve"
+        ]
+      ],
+      "check": "Breakneck Ridge and its train stop are closed for construction until 2027. Check the state park page for the status of the other Highlands trails."
+    },
+    {
+      "id": "new-haven",
+      "photo_wiki": "Yale University Art Gallery",
+      "station": "New Haven",
+      "railroad": "Metro-North",
+      "line": "New Haven Line",
+      "stop": "New Haven",
+      "route_ids": [
+        "3"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "Two free Yale museums, then a coal-oven pizza on Wooster Street",
+      "pitch": "The Yale University Art Gallery and the Yale Center for British Art face each other across Chapel Street, and both are free. Walk back toward the station by way of Wooster Square, where Frank Pepe Pizzeria Napoletana has been making New Haven-style apizza since 1925.",
+      "ride": "About 2 hours from Grand Central (the fastest trains take 1 hour 54), with trains about every half hour on weekends.",
+      "on_foot": "Both museums are about a mile from Union Station, and Pepe's is about 0.8 mile in the other direction.",
+      "links": [
+        [
+          "Yale University Art Gallery",
+          "https://artgallery.yale.edu/"
+        ],
+        [
+          "Yale Center for British Art",
+          "https://britishart.yale.edu/"
+        ],
+        [
+          "Frank Pepe Pizzeria Napoletana",
+          "https://www.pepespizzeria.com/"
+        ]
+      ]
+    },
+    {
+      "id": "south-norwalk",
+      "photo_wiki": "Maritime Aquarium at Norwalk",
+      "station": "South Norwalk",
+      "railroad": "Metro-North",
+      "line": "New Haven Line",
+      "stop": "South Norwalk",
+      "route_ids": [
+        "3"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "The Maritime Aquarium and SoNo's old harbor streets, all on foot from the station",
+      "pitch": "The Maritime Aquarium at Norwalk is devoted to the Long Island Sound, from its harbor seals to its sharks, and is an easy rainy-day choice. SoNo's Washington Street is lined with restaurants and small shops.",
+      "ride": "About an hour and five minutes from Grand Central (the fastest trains take 63), with trains about every half hour on weekends.",
+      "on_foot": "The Aquarium is about half a mile from the platform and Washington Street about 0.4 mile.",
+      "links": [
+        [
+          "The Maritime Aquarium",
+          "https://www.maritimeaquarium.org/"
+        ]
+      ]
+    },
+    {
+      "id": "greenwich",
+      "photo_wiki": "Bruce Museum",
+      "station": "Greenwich",
+      "railroad": "Metro-North",
+      "line": "New Haven Line",
+      "stop": "Greenwich",
+      "route_ids": [
+        "3"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "A small museum of art and natural science a five-minute walk from the train",
+      "pitch": "The Bruce Museum pairs art exhibitions with natural history and science, and sits beside Bruce Park, which runs down to Greenwich Harbor. Greenwich Avenue's shops and cafés are a few blocks from the station.",
+      "ride": "About 55 minutes from Grand Central (the fastest trains take 53), with trains about every half hour on weekends.",
+      "on_foot": "The museum is about a quarter mile from the station.",
+      "links": [
+        [
+          "Bruce Museum",
+          "https://www.brucemuseum.org/"
+        ]
+      ]
+    },
+    {
+      "id": "botanical-garden",
+      "photo_wiki": "New York Botanical Garden",
+      "photo_file": "Enid A. Haupt Conservatory kz01.jpg",
+      "station": "Botanical Garden",
+      "railroad": "Metro-North",
+      "line": "Harlem Line",
+      "stop": "Botanical Garden",
+      "route_ids": [
+        "2"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "The New York Botanical Garden is a short walk from this Bronx stop, and the ride is under half an hour",
+      "pitch": "The closest trip in the library: 250 acres including the Thain Family Forest, a surviving piece of the forest that covered the region before the city. The Enid A. Haupt Conservatory, a Victorian glasshouse, makes this a good wet-weather outing too.",
+      "ride": "About 25 minutes from Grand Central, with trains about every half hour on weekends.",
+      "on_foot": "The Garden is about a ten-minute walk from the platform.",
+      "links": [
+        [
+          "New York Botanical Garden",
+          "https://www.nybg.org/"
+        ]
+      ]
+    },
+    {
+      "id": "poughkeepsie",
+      "photo_wiki": "Walkway over the Hudson",
+      "station": "Poughkeepsie",
+      "railroad": "Metro-North",
+      "line": "Hudson Line",
+      "stop": "Poughkeepsie",
+      "route_ids": [
+        "1"
+      ],
+      "months": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "fair_weather": true,
+      "headline": "Cross the Hudson on foot, 212 feet up, on a former railroad bridge",
+      "pitch": "The Walkway Over the Hudson turned a derelict 1889 railroad bridge into a 1.28-mile pedestrian park high above the river, with the Hudson Valley laid out on both sides. Poughkeepsie is the end of the Hudson Line, so you can sit back for the ride and walk the bridge to its far end and back.",
+      "ride": "About 2 hours from Grand Central (the fastest trains take 1 hour 51), with trains roughly hourly on weekends.",
+      "on_foot": "The Poughkeepsie-side entrance is about a mile from the station, uphill.",
+      "links": [
+        [
+          "Walkway Over the Hudson",
+          "https://walkway.org/"
+        ]
+      ]
+    },
+    {
+      "id": "yonkers",
+      "photo_wiki": "Hudson River Museum",
+      "station": "Yonkers",
+      "railroad": "Metro-North",
+      "line": "Hudson Line",
+      "stop": "Yonkers",
+      "route_ids": [
+        "1"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "The Hudson River Museum: art, history and a planetarium in a Victorian mansion on the river",
+      "pitch": "The Hudson River Museum combines art and history galleries with Glenview, a restored Victorian mansion, and a planetarium, on a bluff over the Hudson. The ride is the shortest of the Hudson Line trips, so it works as a half day.",
+      "ride": "About 35 minutes from Grand Central (the fastest trains take 29), with trains about every half hour on weekends.",
+      "on_foot": "The museum is about 1.7 miles from the station.",
+      "check": "Check the museum's opening days and planetarium show times before you go.",
+      "links": [
+        [
+          "Hudson River Museum",
+          "https://www.hrm.org/"
+        ]
+      ]
+    },
+    {
+      "id": "katonah",
+      "photo_wiki": "Katonah Museum of Art",
+      "station": "Katonah",
+      "railroad": "Metro-North",
+      "line": "Harlem Line",
+      "stop": "Katonah",
+      "route_ids": [
+        "2"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "A village museum of contemporary art, a 15-minute walk from the station",
+      "pitch": "The Katonah Museum of Art shows changing exhibitions of contemporary and historical art, and the village around it has independent shops and cafés.",
+      "ride": "About 70 minutes from Grand Central (the fastest trains take 66), with trains roughly hourly on weekends.",
+      "on_foot": "The museum is about 0.8 mile from the station.",
+      "check": "Check the museum's opening days before you go.",
+      "links": [
+        [
+          "Katonah Museum of Art",
+          "https://www.katonahmuseum.org/"
+        ]
+      ]
+    },
+    {
+      "id": "long-beach",
+      "photo_wiki": "Long Beach, New York",
+      "photo_file": "Long Beach, NY boardwalk at sunset.jpg",
+      "station": "Long Beach",
+      "railroad": "LIRR",
+      "line": "Long Beach Branch",
+      "stop": "Long Beach",
+      "route_ids": [
+        "6"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": true,
+      "headline": "A beach town with an ocean boardwalk, a few blocks from the train",
+      "pitch": "The Long Beach boardwalk runs for more than two miles along the Atlantic, and the beach is open to walkers every month of the year; surfers are out in wetsuits well into winter. A good alternative to the Rockaways.",
+      "ride": "About 55 minutes from Penn Station with no change, and trains roughly hourly on weekends. From Fort Greene you can also take the LIRR from Atlantic Terminal and change at Jamaica.",
+      "on_foot": "The beach at National Boulevard is about half a mile from the station and the boardwalk about 0.9 mile.",
+      "links": [
+        [
+          "City of Long Beach",
+          "https://www.longbeachny.gov/"
+        ]
+      ]
+    },
+    {
+      "id": "oyster-bay",
+      "photo_wiki": "Sagamore Hill",
+      "station": "Oyster Bay",
+      "railroad": "LIRR",
+      "line": "Oyster Bay Branch",
+      "stop": "Oyster Bay",
+      "route_ids": [
+        "3"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "A railroad museum by the station, a Revolutionary War spy house and Teddy Roosevelt's home town",
+      "pitch": "The Oyster Bay Railroad Museum is a short walk from the station, and Raynham Hall, the home of Robert Townsend of the Culper Spy Ring, is a few minutes along Main Street. Sagamore Hill, Theodore Roosevelt's home, is a National Historic Site about 2.6 miles away on foot.",
+      "ride": "Change at Jamaica: the Oyster Bay Branch takes about 58 minutes from there, with trains about every two hours on Saturdays. From Fort Greene you can also start from Atlantic Terminal.",
+      "on_foot": "The railroad museum is about 0.4 mile and Raynham Hall about 0.3 mile from the station. Sagamore Hill is about 2.6 miles, a 50-minute walk each way.",
+      "links": [
+        [
+          "Raynham Hall Museum",
+          "https://www.raynhamhallmuseum.org/"
+        ],
+        [
+          "Sagamore Hill",
+          "https://www.nps.gov/sahi/"
+        ]
+      ]
+    },
+    {
+      "id": "greenport",
+      "photo_wiki": "Greenport, New York",
+      "photo_file": "Greenport Harbor on a spring morning.jpg",
+      "station": "Greenport",
+      "railroad": "LIRR",
+      "line": "Greenport Service",
+      "stop": "Greenport",
+      "route_ids": [
+        "13",
+        "4"
+      ],
+      "months": [
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "fair_weather": true,
+      "big_day": true,
+      "headline": "A working harbor town at the tip of the North Fork, with a maritime museum, a carousel and the ferry to Shelter Island",
+      "pitch": "Greenport's harbor is a few steps from the platform. The East End Seaport Maritime Museum is by the water, Mitchell Park has an antique carousel on the harbor, and the North Ferry to Shelter Island leaves beside the station.",
+      "ride": "This is a long day. Weekend trains to Greenport leave from Ronkonkoma (four a day on the current Saturday timetable): Penn Station to Ronkonkoma takes about 80 minutes, then 85 to 115 minutes more. Allow about three hours each way, and look up the last train back before you go.",
+      "on_foot": "The Seaport Museum is about 300 feet from the station, the ferry landing is beside it, and the carousel is about a 4-minute walk.",
+      "links": [
+        [
+          "East End Seaport Museum",
+          "https://eastendseaport.org/"
+        ],
+        [
+          "North Ferry to Shelter Island",
+          "https://www.northferry.com/"
+        ]
+      ]
+    },
+    {
+      "id": "east-hampton",
+      "photo_wiki": "East Hampton (village), New York",
+      "station": "East Hampton",
+      "railroad": "LIRR",
+      "line": "Montauk Branch",
+      "stop": "East Hampton",
+      "route_ids": [
+        "5"
+      ],
+      "months": [
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "fair_weather": true,
+      "big_day": true,
+      "headline": "Guild Hall's galleries and a Hamptons village without a car",
+      "pitch": "East Hampton's village green, Guild Hall's art galleries and the Home, Sweet Home museum, a 1720s saltbox, are within a short walk of the station. LongHouse Reserve, a sculpture garden, is about a mile and a half away.",
+      "ride": "This is also a long day. Change at Jamaica: the Montauk Branch takes about 2 hours 15 minutes from there, and only a handful of trains run each Saturday (five on the current timetable), so look up the last train back before you go.",
+      "on_foot": "Guild Hall is about 0.7 mile and the Home, Sweet Home museum about 0.8 mile from the station. LongHouse Reserve is about 1.5 miles.",
+      "links": [
+        [
+          "Guild Hall",
+          "https://www.guildhall.org/"
+        ],
+        [
+          "LongHouse Reserve",
+          "https://www.longhouse.org/"
+        ]
+      ]
+    },
+    {
+      "id": "bay-shore",
+      "photo_wiki": "Fire Island Lighthouse",
+      "station": "Bay Shore",
+      "railroad": "LIRR",
+      "line": "Montauk Branch",
+      "stop": "Bay Shore",
+      "route_ids": [
+        "5"
+      ],
+      "months": [
+        6,
+        7,
+        8,
+        9
+      ],
+      "fair_weather": true,
+      "headline": "Take the ferry from Bay Shore to Fire Island, no car required",
+      "pitch": "The Fire Island ferries leave from Maple Avenue, about a mile south of the station, for the communities and the National Seashore on the barrier island. Most Fire Island communities are car-free: you walk to the beach.",
+      "ride": "Change at Jamaica: Jamaica to Bay Shore takes about 40 to 47 minutes, with trains about every hour and a half on Saturdays.",
+      "on_foot": "The ferry terminal is about a mile from the station (Fourth Avenue turns into Maple Avenue).",
+      "check": "Ferry sailings are fewer off-season: check the schedule before you go.",
+      "links": [
+        [
+          "Fire Island Ferries",
+          "https://fireislandferries.com/"
+        ],
+        [
+          "Fire Island National Seashore",
+          "https://www.nps.gov/fiis/"
+        ]
+      ]
+    },
+    {
+      "id": "huntington",
+      "photo_wiki": "Heckscher Museum of Art",
+      "station": "Huntington",
+      "railroad": "LIRR",
+      "line": "Port Jefferson Branch",
+      "stop": "Huntington",
+      "route_ids": [
+        "10"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "The Heckscher Museum of Art in its park, and an art-house cinema, in Huntington village",
+      "pitch": "The Heckscher Museum of Art sits in Heckscher Park at the edge of Huntington village, and the Cinema Arts Centre, a nonprofit art-house cinema, is a short walk beyond. The village between them has the shops and restaurants. It is a walk of about two miles from the station, so wear comfortable shoes.",
+      "ride": "About 70 minutes from Penn Station with no change (the fastest trains take 70), with trains about every half hour on weekends. From Fort Greene you can also start from Atlantic Terminal and change at Jamaica.",
+      "on_foot": "The Heckscher Museum is about 2.1 miles and the Cinema Arts Centre about 1.9 miles from the station.",
+      "check": "Check the museum's opening days and the cinema's schedule before you go.",
+      "links": [
+        [
+          "The Heckscher Museum of Art",
+          "https://www.heckscher.org/"
+        ],
+        [
+          "Cinema Arts Centre",
+          "https://cinemaartscentre.org/"
+        ]
+      ]
+    },
+    {
+      "id": "freeport",
+      "photo_wiki": "Freeport, New York",
+      "photo_file": "Freeport, NY Nautical Mile 092.jpg",
+      "station": "Freeport",
+      "railroad": "LIRR",
+      "line": "Babylon Branch",
+      "stop": "Freeport",
+      "route_ids": [
+        "1"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": true,
+      "headline": "Lunch on Freeport's Nautical Mile, among the fishing boats",
+      "pitch": "The Nautical Mile is Freeport's waterfront strip along Woodcleft Avenue: seafood restaurants and bars facing the canal, with fishing boats tied up beside them. The walk from the station crosses the village.",
+      "ride": "About 45 minutes from Penn Station with no change (the fastest trains take 41), with trains about every half hour on weekends. From Fort Greene you can also start from Atlantic Terminal and change at Jamaica.",
+      "on_foot": "The Nautical Mile is about 2.1 miles from the station, a 40-minute walk.",
+      "links": [
+        [
+          "Village of Freeport",
+          "https://www.freeportny.gov/"
+        ]
+      ]
+    },
+    {
+      "id": "glen-cove",
+      "photo_wiki": "Garvies Point Museum and Preserve",
+      "photo_file": "Glen Cove NY Beach.jpg",
+      "station": "Glen Cove",
+      "railroad": "LIRR",
+      "line": "Oyster Bay Branch",
+      "stop": "Glen Cove",
+      "route_ids": [
+        "3"
+      ],
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": true,
+      "headline": "A small museum of Long Island geology and archaeology on the shore of Long Island Sound",
+      "pitch": "Garvies Point Museum and Preserve, run by Nassau County, covers Long Island's geology and its Native American archaeology, and the preserve around it has trails along the Sound.",
+      "ride": "Change at Jamaica: the Oyster Bay Branch takes about 42 minutes from there, with trains about every two hours on Saturdays. From Fort Greene you can also start from Atlantic Terminal.",
+      "on_foot": "The museum is about 2.5 miles from the station, a 50-minute walk.",
+      "check": "Check the museum's opening days before you go.",
+      "links": [
+        [
+          "Garvies Point Museum & Preserve",
+          "https://www.garviespointmuseum.com/"
+        ]
+      ]
+    },
+    {
+      "id": "morristown",
+      "photo_wiki": "Morristown National Historical Park",
+      "station": "Morristown",
+      "railroad": "NJ Transit",
+      "line": "Morristown Line",
+      "stop": "Morristown",
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "Where Washington spent the winter of 1779–80, and Thomas Nast's cartoons, a walk from the station",
+      "pitch": "Morristown National Historical Park includes the Ford Mansion, Washington's headquarters during the hard winter of 1779–80, a little over half a mile from the station. Macculloch Hall Historical Museum, in the village, holds the work of the cartoonist Thomas Nast, who lived in Morristown, and the Morris Museum is about 1.75 miles away. The Morristown Green is in between.",
+      "ride": "About an hour and a quarter from New York Penn Station, though some weekend trains run to Hoboken instead: use NJ Transit's trip planner.",
+      "on_foot": "The Green is about 0.45 mile and the Ford Mansion a little over half a mile from the station. The Morris Museum is about 1.75 miles.",
+      "links": [
+        [
+          "Morristown National Historical Park",
+          "https://www.nps.gov/morr/"
+        ],
+        [
+          "Macculloch Hall",
+          "https://maccullochhall.org/"
+        ],
+        [
+          "Morris Museum",
+          "https://morrismuseum.org/"
+        ]
+      ]
+    },
+    {
+      "id": "newark",
+      "photo_wiki": "New Jersey Performing Arts Center",
+      "station": "Newark Penn Station",
+      "railroad": "NJ Transit",
+      "line": "Northeast Corridor",
+      "stop": "Newark Penn",
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "Portuguese and Brazilian lunch in the Ironbound, then a concert hall and a museum, all on foot",
+      "pitch": "The Ironbound, Newark's Portuguese, Spanish and Brazilian neighborhood, begins just east of Penn Station, with Ferry Street's restaurants and bakeries. The New Jersey Performing Arts Center is a short walk from the station, and the Newark Museum of Art is about a mile away.",
+      "ride": "About 20 minutes from New York Penn Station, with frequent trains on weekends.",
+      "on_foot": "NJPAC is about 0.6 mile from the station and the Newark Museum of Art about a mile.",
+      "links": [
+        [
+          "NJPAC",
+          "https://www.njpac.org/"
+        ],
+        [
+          "The Newark Museum of Art",
+          "https://www.newarkmuseumart.org/"
+        ]
+      ]
+    },
+    {
+      "id": "hoboken",
+      "photo_wiki": "Hoboken Terminal",
+      "station": "Hoboken Terminal",
+      "railroad": "NJ Transit",
+      "line": "Hoboken Terminal",
+      "stop": "Hoboken",
+      "months": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "fair_weather": true,
+      "headline": "A Beaux-Arts railroad terminal and the best view of the Manhattan skyline from New Jersey",
+      "pitch": "Hoboken Terminal, opened in 1907 for the Delaware, Lackawanna & Western Railroad, still has its Beaux-Arts waiting room, ferry slips and train sheds. Walk out onto Pier A Park and along the Hudson River Waterfront Walkway to Sinatra Park, with the skyline across the water.",
+      "ride": "About half an hour from New York Penn Station, usually with a change at Secaucus: use NJ Transit's trip planner. The PATH train from 33rd Street is the other way in.",
+      "on_foot": "Pier A Park is a 4-minute walk and Sinatra Park about 11 minutes from the terminal. The Hoboken Historical Museum is about 1.5 miles.",
+      "links": [
+        [
+          "Hoboken Historical Museum",
+          "https://www.hobokenmuseum.org/"
+        ]
+      ]
+    },
+    {
+      "id": "asbury-park",
+      "photo_wiki": "Asbury Park Convention Hall",
+      "station": "Asbury Park",
+      "railroad": "NJ Transit",
+      "line": "North Jersey Coast Line",
+      "stop": "Asbury Park",
+      "months": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "fair_weather": true,
+      "headline": "A Jersey Shore boardwalk with an Art Deco convention hall and a famous music venue",
+      "pitch": "Asbury Park's boardwalk runs past the Convention Hall and the Paramount Theatre, both built in the 1920s, and the town behind it has murals, record shops and a long music history. Cookman Avenue's shops and restaurants are a few blocks inland.",
+      "ride": "About an hour and a half to an hour and three-quarters from New York Penn Station. Some weekend trains run straight through; otherwise change at Long Branch. Use NJ Transit's trip planner.",
+      "on_foot": "The boardwalk is about 1.1 miles from the station, a 20-minute walk.",
+      "links": [
+        [
+          "NJ Transit's Jersey Shore guide",
+          "https://www.njtransit.com/shore"
+        ]
+      ]
+    },
+    {
+      "id": "new-brunswick",
+      "photo_wiki": "Zimmerli Art Museum",
+      "photo_file": "Rutgers Zimmerli Art Museum 2026a.jpg",
+      "station": "New Brunswick",
+      "railroad": "NJ Transit",
+      "line": "Northeast Corridor",
+      "stop": "New Brunswick",
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "Rutgers' Zimmerli Art Museum, a short walk from the platform, and its Soviet nonconformist collection",
+      "pitch": "The Jane Voorhees Zimmerli Art Museum holds the Norton and Nancy Dodge Collection of Nonconformist Art from the Soviet Union, one of the largest collections of its kind outside Russia. Old Queens and the Rutgers campus are a block or two beyond, and George Street has the restaurants.",
+      "ride": "About 50 minutes from New York Penn Station.",
+      "on_foot": "The museum is about 0.3 mile from the station.",
+      "links": [
+        [
+          "Zimmerli Art Museum",
+          "https://zimmerli.rutgers.edu/"
+        ]
+      ]
+    },
+    {
+      "id": "trenton",
+      "photo_wiki": "Old Barracks Museum",
+      "station": "Trenton",
+      "railroad": "NJ Transit",
+      "line": "Northeast Corridor",
+      "stop": "Trenton",
+      "months": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fair_weather": false,
+      "headline": "The barracks Washington's army surprised on the day after Christmas, 1776, and a State Museum",
+      "pitch": "The Old Barracks Museum, built in 1758, housed the Hessian troops that Washington's army surprised at the Battle of Trenton, and it is a short walk from the station. The New Jersey State Museum is a little farther, near the State House.",
+      "ride": "About an hour and 15 minutes from New York Penn Station.",
+      "on_foot": "The Old Barracks is about a mile from the station and the State Museum about 1.3 miles.",
+      "links": [
+        [
+          "Old Barracks Museum",
+          "https://www.barracks.org/"
+        ]
+      ]
+    },
+    {
+      "id": "red-bank",
+      "photo_wiki": "Count Basie Center for the Arts",
+      "station": "Red Bank",
+      "railroad": "NJ Transit",
+      "line": "North Jersey Coast Line",
+      "stop": "Red Bank",
+      "months": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "fair_weather": false,
+      "headline": "Count Basie's home town: a theater, antique shops and a Navesink River park, all a few blocks from the station",
+      "pitch": "Red Bank's walkable downtown has the Count Basie Center for the Arts, named for the bandleader who was born here, and a run of antique and vintage shops. Riverside Gardens Park is on the Navesink River.",
+      "ride": "About an hour and a half from New York Penn Station, usually changing trains en route: use NJ Transit's trip planner.",
+      "on_foot": "Downtown is a few minutes from the station and Riverside Gardens Park about 0.6 mile.",
+      "links": [
+        [
+          "Count Basie Center for the Arts",
+          "https://thebasie.org/"
+        ]
+      ]
+    }
+  ]
+}

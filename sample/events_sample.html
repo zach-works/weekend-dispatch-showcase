@@ -3,170 +3,292 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
 <meta name="robots" content="noindex, nofollow">
 <title>The Long List &middot; Weekend Dispatch</title>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600;1,700&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --ground:#EDE0C0; --card:#F5EDD8; --panel:#EFE3C3;
-    --ink:#1A1208; --body:#2A1E0A; --muted:#6A5030; --faint:#B89A5A;
-    --accent:#9B3A1A; --rule:#D4B98A; --rule-soft:#C4A46A;
+    --paper:#F7F3E8; --card:#FFFDF6; --pick:#FFF0F5;
+    --ink:#16141A; --muted:#575160; --stroke:#16141A; --rule:rgba(22,20,26,.3); --dot:rgba(22,20,26,.07);
+    --yellow:#FFE600; --pink:#FF2A6D; --cobalt:#0057FF; --time:#0057FF; --cobalt-deep:#0040C8;
+    --on-yellow:#16141A; --on-pink:#16141A; --on-cobalt:#FFFFFF;
+    --btn-bg:#16141A; --btn-fg:#FFE600; --focus:#0057FF;
     --serif:'Cormorant Garamond',Georgia,'Times New Roman',serif;
     --mono:'Courier Prime','Courier New',ui-monospace,monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --ground:#141009; --card:#1E1710; --panel:#262017;
-      --ink:#F3E9D2; --body:#E4D7BC; --muted:#B49F76; --faint:#8A7550;
-      --accent:#E07A4E; --rule:#3A2F20; --rule-soft:#4A3D2A;
+      --paper:#121016; --card:#1D1A24; --pick:#2B1527;
+      --ink:#F7F3E8; --muted:#BDB6C8; --stroke:#F7F3E8; --rule:rgba(247,243,232,.32); --dot:rgba(247,243,232,.06);
+      --cobalt:#2563EB; --time:#8CB0FF;
+      --btn-bg:#FFE600; --btn-fg:#16141A; --focus:#FFE600;
     }
   }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--ground); color:var(--body);
-          font-family:var(--serif); font-size:17px; line-height:1.6;
-          -webkit-font-smoothing:antialiased; }
-  .wrap { max-width:900px; margin:0 auto; padding:26px 18px 64px; }
-  a { color:var(--accent); }
-  .masthead { background:var(--card); border:1px solid var(--rule); padding:24px; }
-  .kicker { font-family:var(--mono); font-size:9px; letter-spacing:.3em;
-             text-transform:uppercase; color:var(--muted); margin:0 0 10px; }
-  .masthead h1 { font-size:clamp(28px,5.5vw,42px); line-height:1.06; margin:0;
-                  color:var(--ink); font-weight:600; text-wrap:balance; }
-  .masthead h1 em { color:var(--accent); font-style:normal; }
-  .standfirst { margin:12px 0 0; color:var(--muted); font-style:italic; max-width:60ch; }
-  .rule-sm { width:32px; height:2px; background:var(--accent); margin:14px 0 0; }
-  .seclabel { display:flex; align-items:center; gap:12px; margin:46px 0 14px; }
-  .seclabel span:first-child { font-family:var(--mono); font-size:9px;
-      letter-spacing:.26em; text-transform:uppercase; color:var(--accent); white-space:nowrap; }
-  .seclabel .bar { flex:1; height:1px; background:var(--rule); }
-  .seclabel .rom { font-style:italic; font-size:13px; color:var(--faint); }
-  .panel { background:var(--card); border:1px solid var(--rule); padding:20px; }
-  .roomgrid { display:grid; gap:14px;
-               grid-template-columns:repeat(auto-fit,minmax(252px,1fr)); }
-  .room { background:var(--card); border:1px solid var(--rule); padding:15px 17px 17px; }
-  .room--quiet, .room--unlisted { background:var(--panel); }
-  .roomhead { display:flex; align-items:center; justify-content:space-between; gap:9px; }
-  .roomhead h3 { margin:0; font-size:19px; color:var(--ink); font-weight:600; }
-  .pill { font-family:var(--mono); font-size:7.5px; letter-spacing:.14em;
-           text-transform:uppercase; padding:3px 7px; white-space:nowrap; }
-  .pill--live { background:var(--accent); color:var(--card); }
-  .pill--quiet { background:var(--rule); color:var(--muted); }
-  .pill--unlisted { border:1px solid var(--rule-soft); color:var(--muted); }
-  .roomwhere { font-family:var(--mono); font-size:8.5px; letter-spacing:.16em;
-                text-transform:uppercase; color:var(--faint); margin:4px 0 11px; }
-  .rows { list-style:none; margin:0; padding:0; display:flex;
-           flex-direction:column; gap:8px; }
-  .lrow, .rrow { display:grid; grid-template-columns:76px 1fr auto; gap:12px;
-                  align-items:baseline; padding-left:11px;
-                  border-left:2px solid var(--rule); }
-  .rrow { grid-template-columns:62px 1fr auto; }
-  /* Inside a room's own card the venue name is the heading, so repeating it on
-     every row is just noise. Artist cards keep it — there it's the city. */
-  .room:not(.room--artist) .rrow .lvenue { display:none; }
-  .room:not(.room--artist) .rrow { grid-template-columns:76px 1fr; }
-  .rrow .ltime { white-space:nowrap; }
-  .lrow.is-picked { border-left-color:var(--accent); }
-  .ltime { font-family:var(--mono); font-size:9.5px; letter-spacing:.06em;
-            color:var(--faint); font-variant-numeric:tabular-nums; }
-  .lname a { color:var(--ink); text-decoration:none;
-              border-bottom:1px solid var(--rule); font-weight:600; }
-  .lname a:hover { color:var(--accent); border-bottom-color:var(--accent); }
-  .lmeta { display:block; font-style:italic; font-size:13.5px; color:var(--muted); }
-  .lvenue { font-family:var(--mono); font-size:8.5px; letter-spacing:.14em;
-             text-transform:uppercase; color:var(--muted); white-space:nowrap; }
-  .rempty { font-style:italic; color:var(--muted); font-size:14.5px; }
-  .daygroup + .daygroup { margin-top:20px; padding-top:18px;
-                           border-top:1px solid var(--rule); }
-  .dayhead { display:flex; align-items:baseline; gap:10px; margin:0 0 11px;
-              font-family:var(--mono); font-size:9.5px; letter-spacing:.18em;
-              text-transform:uppercase; color:var(--muted); font-weight:400; }
-  .is-headline .dayhead { color:var(--accent); }
-  .daytag { font-family:var(--mono); font-size:7.5px; letter-spacing:.14em;
-             text-transform:uppercase; color:var(--card); background:var(--accent);
-             padding:3px 6px; }
-  .foot { margin-top:48px; padding-top:16px; border-top:1px solid var(--rule);
-           font-family:var(--mono); font-size:8.5px; letter-spacing:.16em;
-           text-transform:uppercase; color:var(--faint);
-           display:flex; flex-wrap:wrap; gap:10px; justify-content:space-between; }
-  a:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--paper); color:var(--ink);
+         background-image:radial-gradient(var(--dot) 1.1px, transparent 1.3px); background-size:14px 14px;
+         font-family:var(--serif); font-size:18px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:960px; margin:0 auto; padding:24px 16px 72px; }
+  a { color:inherit; }
+  a:focus-visible { outline:3px solid var(--focus); outline-offset:3px; }
+
+  /* masthead: the flyer */
+  .masthead { position:relative; overflow:hidden; background:var(--yellow); color:var(--on-yellow);
+              border:2px solid var(--on-yellow); box-shadow:8px 8px 0 var(--pink); padding:20px 20px 30px; }
+  .masthead::after { content:""; position:absolute; right:-36px; top:-36px; width:230px; height:230px; border-radius:50%;
+                     background-image:radial-gradient(var(--on-yellow) 1.7px, transparent 2px); background-size:12px 12px;
+                     opacity:.2; pointer-events:none; }
+  .masthead > * { position:relative; z-index:1; }
+  .kicker { margin:0 0 6px; font-family:var(--mono); font-weight:700; font-size:12px; letter-spacing:.2em; text-transform:uppercase; }
+  .kicker a { display:inline-flex; align-items:center; min-height:44px; text-decoration:underline;
+              text-decoration-thickness:2px; text-underline-offset:4px; }
+  .kicker a:hover { background:var(--on-yellow); color:var(--yellow); text-decoration:none; padding:0 6px; margin:0 -6px; }
+  .masthead a:focus-visible { outline-color:var(--on-yellow); }
+  .masthead h1 { margin:0; font-weight:700; font-size:clamp(42px,11vw,80px); line-height:.96; letter-spacing:-.01em; text-wrap:balance; }
+  .masthead h1 em { display:block; margin-top:6px; font-style:italic; font-weight:600; color:var(--cobalt-deep);
+                    font-size:.62em; line-height:1.05; letter-spacing:0; }
+  .standfirst { margin:16px 0 0; max-width:58ch; font-style:italic; font-weight:500; font-size:clamp(18px,3.6vw,22px); line-height:1.4; }
+
+  /* section labels */
+  .seclabel { display:flex; align-items:center; gap:12px; margin:54px 0 22px; font-size:inherit; font-weight:400; }
+  .seclabel .sec-name { font-family:var(--mono); font-weight:700; font-size:13px; letter-spacing:.2em; text-transform:uppercase;
+                        padding:7px 12px; background:var(--btn-bg); color:var(--btn-fg); }
+  .seclabel .bar { flex:1; min-width:12px; height:0; border-top:2px solid var(--stroke); }
+  .seclabel .rom { font-style:italic; font-weight:600; font-size:20px; color:var(--muted); }
+
+  /* date banners */
+  .date-group + .date-group { margin-top:38px; }
+  .date-banner { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 14px;
+                 margin:0 0 24px; padding:10px 16px; background:var(--cobalt); color:var(--on-cobalt);
+                 border:2px solid var(--stroke); font-weight:400; }
+  .is-headline .date-banner { box-shadow:6px 6px 0 var(--yellow); }
+  .date-name { font-style:italic; font-weight:700; font-size:clamp(23px,5.4vw,30px); line-height:1.1; }
+  .daytag { font-family:var(--mono); font-weight:700; font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+            padding:5px 9px; background:var(--yellow); color:var(--on-yellow); border:2px solid var(--on-yellow); }
+
+  /* the flyer grid */
+  .event-grid { list-style:none; margin:0; padding:0; display:grid; gap:24px 18px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .event-card { position:relative; display:flex; flex-direction:column; gap:6px; min-width:0; padding:18px 16px 16px;
+                background:var(--card); border:2px solid var(--stroke); }
+  .event-card.is-pick { background:var(--pick); box-shadow:6px 6px 0 var(--pink); }
+  .pick-badge { position:absolute; top:-14px; right:10px; transform:rotate(2deg); padding:6px 8px; line-height:1;
+                font-family:var(--mono); font-weight:700; font-size:11px; letter-spacing:.12em; text-transform:uppercase;
+                background:var(--pink); color:var(--on-pink); border:2px solid var(--stroke); }
+  .event-time { margin:0; font-family:var(--mono); font-weight:700; font-size:14px; letter-spacing:.04em; color:var(--time); }
+  .event-title { margin:0; font-weight:700; font-size:24px; line-height:1.1; color:var(--ink); overflow-wrap:anywhere; }
+  .event-title a { display:flex; align-items:center; min-height:44px; padding:4px 0; color:inherit;
+                   text-decoration:underline; text-decoration-thickness:2px; text-underline-offset:4px;
+                   text-decoration-color:var(--pink); }
+  .event-title a:hover { background:var(--yellow); color:var(--on-yellow); text-decoration-color:var(--on-yellow); }
+  .event-title .event-name { display:block; padding:4px 0; }
+  .event-venue { margin:0; font-family:var(--mono); font-size:13px; letter-spacing:.02em; color:var(--muted); }
+  .event-price { align-self:flex-start; display:inline-block; padding:2px 8px; font-family:var(--mono); font-weight:700; font-size:13px;
+                 background:var(--yellow); color:var(--on-yellow); border:2px solid var(--on-yellow); }
+  .event-actions { margin-top:auto; padding-top:10px; }
+  .dice-btn { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 16px;
+              font-family:var(--mono); font-weight:700; font-size:12.5px; letter-spacing:.08em; text-transform:uppercase;
+              text-decoration:none; background:var(--btn-bg); color:var(--btn-fg); border:2px solid var(--btn-bg); }
+  .dice-btn span { margin-left:.55em; }
+  .dice-btn:hover { background:var(--pink); color:var(--on-pink); border-color:var(--stroke); }
+  .event-soldout { display:inline-flex; align-items:center; min-height:44px; padding:0 12px;
+                   font-family:var(--mono); font-weight:700; font-size:12.5px; letter-spacing:.08em; text-transform:uppercase;
+                   color:var(--muted); border:2px dashed var(--stroke); }
+  .rempty { grid-column:1/-1; list-style:none; padding:14px 16px; font-style:italic; font-size:18px; color:var(--muted);
+            border:2px dashed var(--stroke); }
+
+  /* the rooms */
+  .roomgrid { display:grid; align-items:start; gap:24px 20px; grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); }
+  .room { min-width:0; padding:16px 18px 14px; background:var(--card); border:2px solid var(--stroke); }
+  .room--live { box-shadow:6px 6px 0 var(--cobalt); }
+  .room--quiet, .room--unlisted { background:transparent; border-style:dashed; }
+  .roomhead { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 10px; }
+  .roomhead h3 { margin:0; font-weight:700; font-size:27px; line-height:1.05; color:var(--ink); }
+  .pill { padding:4px 8px; font-family:var(--mono); font-weight:700; font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+          white-space:nowrap; border:2px solid var(--stroke); }
+  .pill--live { background:var(--cobalt); color:var(--on-cobalt); }
+  .pill--quiet { background:var(--yellow); color:var(--on-yellow); border-color:var(--on-yellow); }
+  .pill--unlisted { border-style:dashed; color:var(--muted); }
+  .roomwhere { margin:6px 0 10px; font-family:var(--mono); font-size:12.5px; letter-spacing:.04em; color:var(--muted); }
+  .room-rows { list-style:none; margin:0; padding:0; }
+  .room-row { display:grid; grid-template-columns:84px minmax(0,1fr); gap:0 12px; align-items:start; padding:6px 0 6px 12px;
+              border-top:2px dashed var(--rule); }
+  .room-row:first-child { border-top:0; }
+  .room-row.is-pick { background:var(--pick); box-shadow:inset 5px 0 0 var(--pink); }
+  .room-when { padding-top:14px; font-family:var(--mono); font-weight:700; font-size:12.5px; line-height:1.3; color:var(--time); }
+  .room-when small { display:block; font-size:12px; font-weight:400; color:var(--muted); }
+  .room-main { min-width:0; }
+  .room-row .event-title { display:block; font-size:21px; }
+  .room-meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; padding-bottom:6px;
+               font-family:var(--mono); font-size:12.5px; color:var(--muted); }
+  .room-meta:empty { display:none; }
+  .room-meta .pick-badge { position:static; transform:none; }
+  .room-meta .event-soldout { min-height:0; padding:2px 8px; font-size:11px; }
+  .room .rempty { margin:0 0 4px; }
+
+  .foot { margin-top:60px; padding-top:16px; border-top:2px solid var(--stroke); display:flex; flex-wrap:wrap; gap:8px 14px;
+          justify-content:space-between; font-family:var(--mono); font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+          color:var(--muted); }
+
+  @media (max-width:840px) {
+    .event-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  }
   @media (max-width:560px) {
-    .lrow, .rrow { grid-template-columns:66px 1fr; }
-    .lvenue { grid-column:2; }
+    .wrap { padding:18px 16px 56px; }
+    .masthead { padding:14px 16px 24px; box-shadow:6px 6px 0 var(--pink); }
+    .masthead::after { right:-30px; top:-30px; width:140px; height:140px; opacity:.16; }
+    .kicker { font-size:11.5px; letter-spacing:.1em; }
+    .event-grid { grid-template-columns:1fr; gap:26px; }
+    .dice-btn { width:100%; }
+    .seclabel { margin-top:44px; }
+    .room-row { grid-template-columns:76px minmax(0,1fr); gap:0 10px; }
   }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="masthead">
-    <p class="kicker">Weekend Dispatch &middot; Companion Page</p>
-    <h1>The Long List<br><em>every room, every night</em></h1>
+    <p class="kicker"><a href="weekend.html">Weekend Dispatch</a> &middot; Companion Page</p>
+    <h1>The Long List<em>every room, every night</em></h1>
     <p class="standfirst">The five picks in the email came from here. This is the
       rest of it &mdash; every Friday and Saturday at the tracked rooms between
-      now and 4 December, plus whatever else DICE has
+      now and 11 December, plus whatever else DICE has
       within five miles of Fort Greene.</p>
-    <div class="rule-sm"></div>
   </header>
 
-  <div class="seclabel"><span>The Ledger</span><div class="bar"></div><span class="rom">i.</span></div>
-  <div class="panel">
-      <section class="daygroup is-headline">
-        <h3 class="dayhead"><span>Saturday, November 21</span><span class="daytag">in the email</span></h3>
-        <ul class="rows"><li class="rempty">Nothing booked at the tracked rooms.</li></ul>
+  <h2 class="seclabel"><span class="sec-name">The Ledger</span><span class="bar"></span><span class="rom">i.</span></h2>
+  <div class="ledger">
+      <section class="date-group is-headline">
+        <h3 class="date-banner"><span class="date-name">Saturday, November 28</span><span class="daytag">In the email</span></h3>
+        <ul class="event-grid"><li class="rempty">Nothing booked at the tracked rooms.</li></ul>
       </section>
-      <section class="daygroup is-headline">
-        <h3 class="dayhead"><span>Friday, November 27</span><span class="daytag">in the email</span></h3>
-        <ul class="rows"><li class="rempty">Nothing booked at the tracked rooms.</li></ul>
+      <section class="date-group is-headline">
+        <h3 class="date-banner"><span class="date-name">Friday, December 4</span><span class="daytag">In the email</span></h3>
+        <ul class="event-grid"><li class="rempty">Nothing booked at the tracked rooms.</li></ul>
       </section>
-      <section class="daygroup">
-        <h3 class="dayhead"><span>Saturday, November 28</span></h3>
-        <ul class="rows"><li class="rempty">Nothing booked at the tracked rooms.</li></ul>
+      <section class="date-group">
+        <h3 class="date-banner"><span class="date-name">Saturday, December 5</span></h3>
+        <ul class="event-grid"><li class="rempty">Nothing booked at the tracked rooms.</li></ul>
       </section>
-      <section class="daygroup">
-        <h3 class="dayhead"><span>Friday, December 4</span></h3>
-        <ul class="rows"><li class="rempty">Nothing booked at the tracked rooms.</li></ul>
+      <section class="date-group">
+        <h3 class="date-banner"><span class="date-name">Friday, December 11</span></h3>
+        <ul class="event-grid"><li class="rempty">Nothing booked at the tracked rooms.</li></ul>
       </section>
   </div>
 
-  <div class="seclabel"><span>The Rooms</span><div class="bar"></div><span class="rom">ii.</span></div>
+  <h2 class="seclabel"><span class="sec-name">The Rooms</span><span class="bar"></span><span class="rom">ii.</span></h2>
   <div class="roomgrid">
-      <article class="room room--quiet">
+      <article class="room room--unlisted">
         <header class="roomhead">
-          <h3>Sample Venue A</h3><span class="pill pill--quiet">nothing this fortnight</span>
+          <h3>Sample Venue A</h3><span class="pill pill--unlisted">not readable</span>
         </header>
         <p class="roomwhere"></p>
-        <ul class="rows"><li class="rempty">Sample entry: nothing listed in this demo.</li></ul>
+        <ul class="room-rows"><li class="rempty">Couldn&#x27;t read the DICE page (HTTP 404).</li></ul>
       </article>
-      <article class="room room--quiet">
+      <article class="room room--unlisted">
         <header class="roomhead">
-          <h3>Sample Venue B</h3><span class="pill pill--quiet">nothing this fortnight</span>
+          <h3>Sample Venue B</h3><span class="pill pill--unlisted">not readable</span>
         </header>
         <p class="roomwhere"></p>
-        <ul class="rows"><li class="rempty">Sample entry: nothing listed in this demo.</li></ul>
+        <ul class="room-rows"><li class="rempty">Couldn&#x27;t read the DICE page (HTTP 404).</li></ul>
       </article>
-      <article class="room room--quiet">
+      <article class="room room--unlisted">
         <header class="roomhead">
-          <h3>Sample Venue C</h3><span class="pill pill--quiet">nothing this fortnight</span>
+          <h3>Sample Venue C</h3><span class="pill pill--unlisted">not readable</span>
         </header>
         <p class="roomwhere"></p>
-        <ul class="rows"><li class="rempty">Sample entry: nothing listed in this demo.</li></ul>
+        <ul class="room-rows"><li class="rempty">Couldn&#x27;t read the DICE page (HTTP 404).</li></ul>
       </article>
-      <article class="room room--quiet room--artist">
+      <article class="room room--unlisted room--artist">
         <header class="roomhead">
           <h3>Sample Artist</h3>
-          <span class="pill pill--quiet">artist watch</span>
+          <span class="pill pill--unlisted">artist watch</span>
         </header>
         <p class="roomwhere">Following</p>
-        <ul class="rows"><li class="rempty">Sample entry: nothing listed in this demo.</li></ul>
+        <ul class="room-rows"><li class="rempty">Couldn&#x27;t read the DICE page (HTTP 404).</li></ul>
       </article>
   </div>
 
-  <div class="seclabel"><span>Elsewhere in Brooklyn</span><div class="bar"></div><span class="rom">iii.</span></div>
-  <div class="panel"><p class="rempty">Nothing else within five miles on these nights. DICE's browse pages only see a few days ahead, so this section fills in closer to the weekend.</p>
+  <h2 class="seclabel"><span class="sec-name">Elsewhere in Brooklyn</span><span class="bar"></span><span class="rom">iii.</span></h2>
+  <div class="ledger">
+      <section class="date-group">
+        <h3 class="date-banner"><span class="date-name">Saturday, November 28</span></h3>
+        <ul class="event-grid">
+          <li class="event-card">
+            
+            <p class="event-time">10:00 am</p>
+            <h4 class="event-title"><a href="https://dice.fm/event/6adff5e33e36240001ff4c32">Baci Studio Weekend Fashion Market</a></h4>
+            <p class="event-venue">Baci Studio</p>
+            <span class="event-price">Free</span>
+            <div class="event-actions"><a class="dice-btn" href="https://dice.fm/event/6adff5e33e36240001ff4c32" aria-label="Tickets on DICE: Baci Studio Weekend Fashion Market">Tickets on DICE<span aria-hidden="true">&rarr;</span></a></div>
+          </li>
+          <li class="event-card">
+            
+            <p class="event-time">11:00 am</p>
+            <h4 class="event-title"><a href="https://dice.fm/event/6afba9741d61400001d72f2b">Ames Jewelry Open Studio - Saturday 11/28</a></h4>
+            <p class="event-venue">Ames Jewelry</p>
+            <span class="event-price">Free</span>
+            <div class="event-actions"><a class="dice-btn" href="https://dice.fm/event/6afba9741d61400001d72f2b" aria-label="Tickets on DICE: Ames Jewelry Open Studio - Saturday 11/28">Tickets on DICE<span aria-hidden="true">&rarr;</span></a></div>
+          </li>
+          <li class="event-card">
+            
+            <p class="event-time">7:00 pm</p>
+            <h4 class="event-title"><a href="https://dice.fm/event/6acc027d75af86000152d4b5">HOUSE SHOW: A Wrestling Photography Event</a></h4>
+            <p class="event-venue">Purgatory</p>
+            <span class="event-price">$17</span>
+            <div class="event-actions"><a class="dice-btn" href="https://dice.fm/event/6acc027d75af86000152d4b5" aria-label="Tickets on DICE: HOUSE SHOW: A Wrestling Photography Event">Tickets on DICE<span aria-hidden="true">&rarr;</span></a></div>
+          </li></ul>
+      </section>
+      <section class="date-group">
+        <h3 class="date-banner"><span class="date-name">Friday, December 4</span></h3>
+        <ul class="event-grid">
+          <li class="event-card">
+            
+            <p class="event-time">3:00 pm</p>
+            <h4 class="event-title"><a href="https://dice.fm/event/6afbaa1e3dae300001f4c767">Ames Jewelry Open Studio - Friday 12/4</a></h4>
+            <p class="event-venue">Ames Jewelry</p>
+            <span class="event-price">Free</span>
+            <div class="event-actions"><a class="dice-btn" href="https://dice.fm/event/6afbaa1e3dae300001f4c767" aria-label="Tickets on DICE: Ames Jewelry Open Studio - Friday 12/4">Tickets on DICE<span aria-hidden="true">&rarr;</span></a></div>
+          </li></ul>
+      </section>
+      <section class="date-group">
+        <h3 class="date-banner"><span class="date-name">Saturday, December 5</span></h3>
+        <ul class="event-grid">
+          <li class="event-card">
+            
+            <p class="event-time">11:00 am</p>
+            <h4 class="event-title"><a href="https://dice.fm/event/6aea26938723ec0001897653">Holiday Art Pop-Up at Baci Studio</a></h4>
+            <p class="event-venue">Baci Studio</p>
+            <span class="event-price">Free</span>
+            <div class="event-actions"><a class="dice-btn" href="https://dice.fm/event/6aea26938723ec0001897653" aria-label="Tickets on DICE: Holiday Art Pop-Up at Baci Studio">Tickets on DICE<span aria-hidden="true">&rarr;</span></a></div>
+          </li>
+          <li class="event-card">
+            
+            <p class="event-time">5:00 pm</p>
+            <h4 class="event-title"><a href="https://dice.fm/event/6ab5dacf3fd3b20001002982">Jojo&#x27;s Bizarre Adventure: Steel Ball Run // FINALE</a></h4>
+            <p class="event-venue">Seventh Heaven Bar &amp; Karaoke</p>
+            <span class="event-price">Free</span>
+            <div class="event-actions"><a class="dice-btn" href="https://dice.fm/event/6ab5dacf3fd3b20001002982" aria-label="Tickets on DICE: Jojo&#x27;s Bizarre Adventure: Steel Ball Run // FINALE">Tickets on DICE<span aria-hidden="true">&rarr;</span></a></div>
+          </li></ul>
+      </section>
+      <section class="date-group">
+        <h3 class="date-banner"><span class="date-name">Friday, December 11</span></h3>
+        <ul class="event-grid">
+          <li class="event-card">
+            
+            <p class="event-time">7:30 pm</p>
+            <h4 class="event-title"><a href="https://dice.fm/event/6b05b52dc08d5e0001c2a52a">A Very Cherry Non-Denominational Christmas Carol!</a></h4>
+            <p class="event-venue">C&#x27;mon Everybody</p>
+            <span class="event-price">$13.39</span>
+            <div class="event-actions"><a class="dice-btn" href="https://dice.fm/event/6b05b52dc08d5e0001c2a52a" aria-label="Tickets on DICE: A Very Cherry Non-Denominational Christmas Carol!">Tickets on DICE<span aria-hidden="true">&rarr;</span></a></div>
+          </li></ul>
+      </section>
   </div>
 
   <div class="foot">
     <span>Fort Greene &middot; Brooklyn</span>
-    <span>Source: DICE &middot; generated 15 November 2026, 11:45 AM</span>
+    <span>Source: DICE &middot; generated 25 November 2026, 9:44 PM</span>
   </div>
 </div>
 </body>

@@ -10,7 +10,10 @@ mechanics can be read without anyone's personal details.
 Station stop_ids and walking estimates are illustrative, not verified.
 """
 
+TIMEZONE = "America/New_York"
+
 READER_NAME = "Alex Sample"          # fictional
+READER_DOG = "Biscuit"               # fictional
 NEIGHBORHOOD = "Fort Greene"
 
 # Center of Fort Greene Park (public landmark), used as the sample "home".
@@ -67,7 +70,13 @@ DICE_TRACKED_VENUES = {
     "Sample Venue B": "sample-venue-b",
     "Sample Venue C": "sample-venue-c",
 }
+DICE_VENUE_NOTES = {}                # why a room may be dark, in the reader's words (none in the sample)
 
 DICE_TRACKED_ARTISTS = {
     "Sample Artist": "sample-artist",
 }
+DICE_ARTIST_LOCAL_ONLY = True        # tracked artists only count when they play New York
+
+# The community-paper feature is off in the public copy. It is a real local
+# publication, and its link would reveal the reader's neighbourhood.
+CHCO_ENABLED = False

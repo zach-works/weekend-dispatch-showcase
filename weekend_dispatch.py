@@ -1,21 +1,33 @@
 #!/usr/bin/env python3
 """
-Weekend Dispatch: a Saturday-morning personal newsletter (showcase copy).
+Weekend Dispatch — Fort Greene
+Sends every Saturday at 9:30am covering the full weekend.
+Sections: MTA alerts · Weather + Biscuit walk windows · Farmers market · BPL events · Brooklyn culture news
 
-Covers the full weekend: MTA service changes for the reader's lines, weather and
-dog-walk windows, a farmers-market go/no-go, venue and DICE event picks,
-Brooklyn culture news, and rotating nature sections. The email itself is a
-designed envelope that links to the full newsletter hosted on GitHub Pages.
-
-SHOWCASE COPY: personal settings were replaced with fictional sample values
-(see sample_profile.py), keys come from environment variables, and the
-GitHub Actions schedule is turned off. It is not wired to send anything.
-
-Environment variables (for a real deployment):
+Required environment variables:
   ANTHROPIC_API_KEY
   DISPATCH_EMAIL        (Gmail sender address)
   DISPATCH_APP_PASSWORD (Gmail App Password)
   DISPATCH_TO           (recipient address)
+
+Changelog (June 2026):
+  - FIX: hour-overflow crash in get_walk_windows when evening best hour is 8pm
+    (best_hour + 4 = 24 → invalid datetime hour). Now uses timedelta, which
+    correctly rolls into the next UTC day.
+  - NEW: market_go_nogo now considers *sustained average* temperature across
+    the outing window, not just the peak — a 2-hour round trip with a black
+    small dog at 85°F+ average warrants caution even if no single
+    hour hits 92°F. Sustained 90°F+ average is a no-go.
+  - NEW: fetch_surface_transit_alerts() watches the B65/B43 buses, the JFK
+    AirTrain (Jamaica + Howard Beach), and the Nostrand Av LIRR station.
+    These are surfaced in the MTA section ONLY when a service is cut, rerouted,
+    or suspended — otherwise they are omitted entirely and only train info shows.
+  - CHANGE: envelope email redrawn as a single realistic SVG (folded-back flap,
+    lit paper, pressed-wax seal, addressed "For Alex Sample"); overall
+    envelope height reduced.
+  - CHANGE: wax seal now carries the ZT monogram (shared with the Morning
+    Dispatch footer) instead of "W.D." — lettering only, cream impression on
+    the red wax, with the monogram's serif detailing.
 """
 
 import os
@@ -32,22 +44,51 @@ from email.utils import formataddr
 from bs4 import BeautifulSoup
 import anthropic
 
+import dispatch_pages as dp
+import dispatch_media as dm
+import envelope_letter as el
+import mta_weekender as mw
+import culture_listings as cl
+import recipes as rcp
+
 # ─────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────
 
-from sample_profile import (   # fictional sample values
-    LAT, LON, HOME_LATLON, CORRIDORS, HOME_STOPS, HOME_LINES, BANNER_STATIONS,
-    ALTERNATE_STATIONS, INTEREST_PROFILE, DICE_TRACKED_VENUES, DICE_TRACKED_ARTISTS,
+from sample_profile import (   # fictional sample values for the public copy
+    LAT, LON, TIMEZONE, CORRIDORS, HOME_STOPS, HOME_LINES, BANNER_STATIONS,
+    ALTERNATE_STATIONS, INTEREST_PROFILE, DICE_TRACKED_VENUES, DICE_VENUE_NOTES,
+    DICE_TRACKED_ARTISTS, DICE_ARTIST_LOCAL_ONLY, HOME_LATLON, READER_NAME, READER_DOG,
+    NEIGHBORHOOD, CHCO_ENABLED,
 )
-TIMEZONE = "America/New_York"
+DICE_CITY = "new_york-5bbf4db0f06331478e9b2c59"
+DICE_BROWSE = f"https://dice.fm/browse/{DICE_CITY}"
+DICE_CATEGORIES = [
+    "music/gig", "music/dj", "music/party", "music/playback",
+    "culture/comedy", "culture/theatre", "culture/art", "culture/film",
+    "culture/social", "culture/talks", "culture/foodanddrink",
+    "culture/workshop", "culture/wellbeing", "culture/sport", "culture/podcast",
+]
 
-# Walk-routing corridors (CORRIDORS) come from sample_profile.py
+# Public Records' shows are added to the On Sale list from its own page (public_records_as_picks), so they
+# are dropped from the DICE picks here to avoid printing the same gig twice.
+DICE_EXCLUDE_VENUES = {"public records"}
 
-# MTA: every current service alert on the reader's lines is pulled system-wide
-# (see fetch_mta_alerts), then split into alerts that touch one of the home
-# stops vs. alerts elsewhere on the line. HOME_STOPS and HOME_LINES come from
-# sample_profile.py.
+DICE_MAX_MILES = 5.0      # the reader's neighbourhood is the anchor; past this it's a trek
+DICE_MAX_PER_VENUE = 2    # keep one busy venue from swallowing the section
+DICE_MAX_PER_DAY = 6      # per day, so a busy Saturday can't crowd out Sunday
+
+# The reader goes out on Fridays and Saturdays. Everything else is noise.
+DICE_GOING_OUT_WEEKDAYS = (4, 5)   # Monday is 0
+
+# The companion page rolls two weeks forward from the Saturday it's built on,
+# so it always shows the next four going-out nights and never a stale tail.
+DICE_WINDOW_DAYS = 14
+
+# The email carries five picks total across the two dates; the companion page
+# carries the rest.
+DICE_HEADLINE_COUNT = 5
+
 
 # GTFS-realtime Service Alerts, JSON flavor (no API key). Each alert carries an
 # informed_entity[] list with route_id and/or stop_id, which is what lets us
@@ -56,22 +97,15 @@ MTA_ALERTS_FEED = (
     "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Fsubway-alerts.json"
 )
 
-# The home-station status banner is built from exactly the BANNER_STATIONS in
-# sample_profile.py: the closest stop on each of the reader's lines.
-
-# Alternate-station lookup for the banner's "go to ___ instead" line comes from
-# ALTERNATE_STATIONS in sample_profile.py, ordered nearest first.
-
-# Sample Hall (venue)
-SAMPLE_HALL_URL = "https://example.com/sample-hall/"
+# Public Records (venue)
+PUBLIC_RECORDS_URL = "https://publicrecords.nyc/"
 
 # Farmers market
-MARKET_URL = "https://www.grownyc.org/greenmarket/manhattan-union-square"
+GRAND_ARMY_MARKET_URL = "https://www.grownyc.org/greenmarket/sample-greenmarket"
 
 # GrowNYC Open Data (Brooklyn markets)
 GROWNYC_API = "https://data.cityofnewyork.us/resource/b7kx-qikm.json"
 
-# INTEREST_PROFILE (what the reader likes) comes from sample_profile.py
 
 
 # ─────────────────────────────────────────────
@@ -423,13 +457,13 @@ def fetch_mta_alerts(saturday, sunday):
     Each alert carries an informed_entity[] list; an entity may name a route
     (route_id), a stop (stop_id), or both. For each alert we take the union of
     all route_ids and all stop_ids across its entities, and keep it only if it
-    informs one of HOME_LINES.
+    informs one of HOME_LINES (A / C / 3).
 
     Returns a flat list (no your/elsewhere grouping — the banner and the single
-    C/G change list are derived from this list downstream). Each item:
+    A/C/3 change list are derived from this list downstream). Each item:
       {
         "text":          alert header (falls back to description),
-        "routes":        ["C", "G", ...] limited to HOME_LINES, in HOME_LINES order,
+        "routes":        ["A", "C", ...] limited to A/C/3, in HOME_LINES order,
         "stop_ids":      sorted list of every stop_id the alert names,
         "is_line_level": True when the alert names no specific stop (whole-line
                          change); False when it names one or more stops,
@@ -482,7 +516,7 @@ def fetch_mta_alerts(saturday, sunday):
         # Drop bare redirect alerts with no route context (e.g. "Take the [A] instead").
         # These are unhelpful without knowing why and which stop is affected.
         import re as _re
-        if len(text) < 80 and _re.search(r'take the \[|use the \[', text.lower()):
+        if len(text) < 80 and _re.match(r'(take|use) the \[', text.lower()):
             continue
 
         # Weekend-scope filter: only alerts active Saturday or Sunday.
@@ -497,6 +531,9 @@ def fetch_mta_alerts(saturday, sunday):
 
         alerts.append({
             "text": text,
+            "plain": mw.plain_alert_text(text),
+            "when": mw.alert_when(alert, saturday, sunday),
+            "detail": mw.alert_detail(alert),
             "routes": [r for r in HOME_LINES if r in matched_routes],
             "stop_ids": sorted(stops),
             "is_line_level": not stops,
@@ -508,8 +545,8 @@ def fetch_mta_alerts(saturday, sunday):
 
 def fetch_surface_transit_alerts():
     """
-    Conditional alerts for the B38 / B52 buses, the JFK AirTrain (Jamaica and
-    Howard Beach), and the Atlantic Terminal LIRR station.
+    Conditional alerts for the B65 / B43 buses, the JFK AirTrain (Jamaica and
+    Howard Beach), and the Nostrand Avenue LIRR station.
 
     These services are ONLY surfaced when they are disrupted — a planned
     reroute, suspension, or service cut. If nothing matching is found, this
@@ -521,11 +558,11 @@ def fetch_surface_transit_alerts():
     """
     # Each watched service: a label plus the substrings that identify it.
     WATCHED = [
-        ("B38 bus",            ["b38"]),
-        ("B52 bus",            ["b52"]),
+        ("B65 bus",            ["b65"]),
+        ("B43 bus",            ["b43"]),
         ("JFK AirTrain (Jamaica)",     ["airtrain", "air train"]),
         ("JFK AirTrain (Howard Beach)", ["airtrain", "air train"]),
-        ("Atlantic Terminal LIRR", ["atlantic terminal"]),
+        ("Nostrand Av LIRR",   ["nostrand av", "nostrand avenue"]),
     ]
 
     # Words that indicate the service is actually CUT or ALTERED (keep these).
@@ -628,7 +665,7 @@ def fetch_market_data():
 
 def market_go_nogo(saturday_data, market_list):
     """
-    Go/no-go logic for Union Square Greenmarket.
+    Go/no-go logic for Sample Greenmarket.
     Rules:
     - Rain > 15% during 11am–3:30pm outing window → no-go
     - Sustained heat: average ≥ 90°F across the outing window → no-go
@@ -640,6 +677,16 @@ def market_go_nogo(saturday_data, market_list):
     """
     hourly = saturday_data.get("hourly", {})
     outing_hours = [11, 12, 13, 14, 15]  # 11am–3pm
+
+    # No forecast (the weather service was down this run): say so, don't invent a verdict.
+    if not any(h in hourly for h in outing_hours):
+        gap = next((m for m in market_list if "grand army" in str(m.get("marketname", "")).lower()), None)
+        return {
+            "verdict": "UNKNOWN",
+            "reason": "The forecast wasn't available this morning, so there's no go/no-go. Check the weather before heading out with Biscuit.",
+            "market_hours": gap.get("hoursoperations", "8am–3pm") if gap else "8am–3pm",
+            "max_rain_outing": None, "peak_temp": None, "avg_temp": None,
+        }
 
     max_rain = max((hourly.get(h, {}).get("rain_pct", 0) for h in outing_hours), default=0)
     temps_outing = [hourly.get(h, {}).get("temp_f", 72) for h in outing_hours if h in hourly]
@@ -668,8 +715,8 @@ def market_go_nogo(saturday_data, market_list):
         verdict = "GO"
         reason = f"Conditions look solid — {avg_temp:.0f}°F average, rain {max_rain:.0f}% during your window."
 
-    # Find Union Square specifically in the market list
-    gap = next((m for m in market_list if "union square" in str(m.get("marketname", "")).lower()), None)
+    # Find Sample Greenmarket specifically in the market list
+    gap = next((m for m in market_list if "grand army" in str(m.get("marketname", "")).lower()), None)
     market_hours = gap.get("hoursoperations", "8am–3pm") if gap else "8am–3pm"
 
     return {
@@ -682,7 +729,7 @@ def market_go_nogo(saturday_data, market_list):
     }
 
 
-# Northeast seasonal produce calendar for Union Square Greenmarket.
+# Northeast seasonal produce calendar for Sample Greenmarket.
 # Reflects what's typically at peak for the NYC/Hudson Valley growing region.
 _SEASONAL_PRODUCE = {
     1:  ["storage apples", "storage pears", "winter squash", "sweet potatoes", "turnips",
@@ -723,18 +770,77 @@ _SEASONAL_PRODUCE = {
 
 
 def get_seasonal_produce(date):
-    """Return a formatted string of what's in season at Union Square this month."""
+    """Return a formatted string of what's in season at Sample Greenmarket this month."""
     items = _SEASONAL_PRODUCE.get(date.month, [])
     return ", ".join(items) if items else "seasonal produce varies"
 
 
 # ─────────────────────────────────────────────
-# SAMPLE HALL EVENTS
+# SUN, GOLDEN HOUR AND TIDES (under the forecast) · SEASONAL RECIPE (Greenmarket section)
 # ─────────────────────────────────────────────
 
-def fetch_sample_hall_events():
+
+
+def _clock(hours):
+    """Decimal clock hours to '6:42a' style, rounded to the minute."""
+    total = round(hours * 60) % (24 * 60)
+    h, m = divmod(total, 60)
+    return f"{h % 12 or 12}:{m:02d}{'a' if h < 12 else 'p'}"
+
+
+def fetch_tide_hilo(saturday, sunday):
+    """High and low tides at the Rockaway station for Saturday and Sunday: [(datetime, 'H' or 'L')].
+    Returns [] when NOAA cannot be read."""
+    params = {"application": "WeekendDispatch", "begin_date": saturday.strftime("%Y%m%d"),
+              "end_date": sunday.strftime("%Y%m%d"), "datum": "MLLW", "station": TIDE_STATION,
+              "time_zone": "lst_ldt", "units": "english", "format": "json",
+              "product": "predictions", "interval": "hilo"}
+    try:
+        r = requests.get(NOAA_TIDES_URL, timeout=30, params=params)
+        r.raise_for_status()
+        return [(datetime.datetime.strptime(p["t"], "%Y-%m-%d %H:%M"), p["type"])
+                for p in r.json()["predictions"]]
+    except Exception as e:
+        print(f"  [sun/tide] tides unavailable: {e}")
+        return []
+
+
+def build_sun_tide_html(saturday, sunday):
+    """Sunrise, sunset, golden hour and tides for each weekend day, placed under the forecast.
+    Empty when none of it can be worked out. Sun times are worked out for Fort Greene (no network needed);
+    tides come from NOAA's Rockaway station, the same one Shore Leave uses."""
+    try:
+        hilo = fetch_tide_hilo(saturday, sunday)
+        rows = []
+        for d, label in ((saturday, "Saturday"), (saturday + datetime.timedelta(days=1), "Sunday")):
+            rise, set_ = _sun_times(d, LAT, LON)
+            lines = [f"sunrise {_clock(rise)} &middot; sunset {_clock(set_)}",
+                     f"golden hour {_clock(rise)}&ndash;{_clock(rise + 1)} in the morning, "
+                     f"{_clock(set_ - 1)}&ndash;{_clock(set_)} in the evening"]
+            if any(t.date() == d for t, _ in hilo):
+                highs = ", ".join(_clock(t.hour + t.minute / 60) for t, ty in hilo if t.date() == d and ty == "H")
+                lows = ", ".join(_clock(t.hour + t.minute / 60) for t, ty in hilo if t.date() == d and ty == "L")
+                lines.append(f"tides: high {highs} &middot; low {lows}")
+            rows.append(f"<div style='margin:0 0 8px;'><b>{label}</b><br>{'<br>'.join(lines)}</div>")
+        if not rows:
+            return ""
+        return (f"<div class='sun-tide' style=\"margin:14px 0 4px;padding:12px 14px;border:1px solid #D4B98A;"
+                f"font-size:14.5px;line-height:1.6;color:#2A1E0A;\">{''.join(rows)}"
+                f"<div style='font-size:11.5px;color:#7A6A4A;'>Golden hour is taken as the hour after sunrise and "
+                f"the hour before sunset. Tides: NOAA, East Rockaway Inlet, so the times run a little off for Fort Greene.</div></div>")
+    except Exception as e:
+        print(f"  [sun/tide] skipped: {e}")
+        return ""
+
+
+
+# ─────────────────────────────────────────────
+# PUBLIC RECORDS EVENTS
+# ─────────────────────────────────────────────
+
+def fetch_public_records_events():
     """
-    Scrape upcoming shows from Sample Hall (a sample venue).
+    Scrape upcoming shows from Public Records (233 Butler St, Gowanus).
     Their homepage lists all events in server-rendered HTML with Dice.fm ticket links.
     Returns list of dicts with 'text', 'url', 'date_str', 'type' fields.
     """
@@ -748,7 +854,7 @@ def fetch_sample_hall_events():
     }
     events = []
     try:
-        r = requests.get("https://example.com/sample-hall/", headers=headers, timeout=15)
+        r = requests.get("https://publicrecords.nyc/", headers=headers, timeout=15)
         if r.status_code != 200:
             return events
         soup = BeautifulSoup(r.text, "html.parser")
@@ -826,132 +932,6 @@ def fetch_sample_hall_events():
             unique.append(e)
 
     return unique
-
-
-def fetch_neighborhood_salon_events():
-    """
-    Fetch upcoming events at Sample Salon (a neighborhood event space).
-    Tries Eventbrite search first, then Partiful. Returns list of event dicts
-    with 'text' and 'url' fields, same shape as BPL events.
-    """
-    today = datetime.date.today()
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-
-    events = []
-
-    # Strategy 1: Eventbrite search
-    for search_url in [
-        "https://www.eventbrite.com/d/ny--brooklyn/sample-salon/",
-        "https://www.eventbrite.com/d/ny--fort-greene/sample-salon/",
-        "https://www.eventbrite.com/d/ny--brooklyn/events/?q=sample+salon",
-    ]:
-        try:
-            r = requests.get(search_url, headers=headers, timeout=15)
-            if r.status_code != 200:
-                continue
-            soup = BeautifulSoup(r.text, "html.parser")
-            for el in soup.find_all(["article", "div"],
-                                     class_=lambda c: c and "event" in str(c).lower()):
-                text = el.get_text(" ", strip=True)
-                anchor = el.find("a", href=True)
-                url = anchor["href"] if anchor else ""
-                if 20 < len(text) < 500 and "salon" in text.lower():
-                    events.append({"text": text[:350], "url": url})
-            if events:
-                break
-        except Exception:
-            continue
-
-    # Strategy 2: Partiful search (they post events here)
-    if not events:
-        try:
-            r = requests.get(
-                "https://partiful.com/search?q=sample+salon",
-                headers=headers, timeout=12
-            )
-            if r.status_code == 200:
-                soup = BeautifulSoup(r.text, "html.parser")
-                for el in soup.find_all(["a", "div"]):
-                    text = el.get_text(" ", strip=True)
-                    if "salon" in text.lower() and "sample" in text.lower() and len(text) > 20:
-                        href = el.get("href", "")
-                        url = f"https://partiful.com{href}" if href.startswith("/") else href
-                        events.append({"text": text[:350], "url": url})
-        except Exception:
-            pass
-
-    return events[:10]
-
-
-
-# ─────────────────────────────────────────────
-# DICE EVENTS
-# ─────────────────────────────────────────────
-
-# DICE's own Next.js pages embed the full event list as JSON in a
-# __NEXT_DATA__ script tag, so no API key and no headless browser are needed.
-# The api.dice.fm host sits behind a Cloudflare bot challenge — we deliberately
-# do not touch it. dice.fm/robots.txt allows crawling (Allow: /) and permits
-# reference use, which is what linking to ticket pages is.
-#
-# Category-filtered browse pages are sorted by date ascending starting from
-# today; the unfiltered page is sorted by popularity and is useless here.
-# Pagination is client-side only, so each request yields roughly the next two
-# to four days of events. That is fine: the dispatch runs Saturday 7:05am, so
-# the events it needs are same-day and next-day and sit well inside page one.
-DICE_CITY = "new_york-5bbf4db0f06331478e9b2c59"
-DICE_BROWSE = f"https://dice.fm/browse/{DICE_CITY}"
-DICE_CATEGORIES = [
-    "music/gig", "music/dj", "music/party", "music/playback",
-    "culture/comedy", "culture/theatre", "culture/art", "culture/film",
-    "culture/social", "culture/talks", "culture/foodanddrink",
-    "culture/workshop", "culture/wellbeing", "culture/sport", "culture/podcast",
-]
-
-# Sample Hall has its own section (iv.), so its shows are dropped here to
-# avoid printing the same gig twice.
-DICE_EXCLUDE_VENUES = {"sample hall"}
-
-DICE_MAX_MILES = 5.0      # Fort Greene is the anchor; past this it's a trek
-DICE_MAX_PER_VENUE = 2    # keep one busy venue from swallowing the section
-DICE_MAX_PER_DAY = 6      # per day, so a busy Saturday can't crowd out Sunday
-
-# ── The watchlist ────────────────────────────────────────────────────────────
-# Venue and artist profile pages embed the same __NEXT_DATA__ JSON as the
-# browse pages, but they list that room's whole run — one to five months out
-# instead of the two-to-four days a browse page reaches. That depth is what
-# lets the email name a show on the *following* Friday, six days ahead, and
-# lets the companion page run a fortnight ahead.
-#
-# The tracked venues and artists (DICE_TRACKED_VENUES, DICE_TRACKED_ARTISTS)
-# come from sample_profile.py. `slug: None` is honoured if a room ever needs to
-# sit on the list unreadable; see DICE_VENUE_NOTES.
-
-# Why a room may be dark, in plain words rather than an error code.
-DICE_VENUE_NOTES = {}
-
-# Tracked artists only count when they're playing New York — a tracked artist's date
-# in Los Angeles is not actionable from Fort Greene.
-DICE_ARTIST_LOCAL_ONLY = True
-
-# Alex goes out on Fridays and Saturdays. Everything else is noise.
-DICE_GOING_OUT_WEEKDAYS = (4, 5)   # Monday is 0
-
-# The companion page rolls two weeks forward from the Saturday it's built on,
-# so it always shows the next four going-out nights and never a stale tail.
-DICE_WINDOW_DAYS = 14
-
-# The email carries five picks total across the two dates; the companion page
-# carries the rest.
-DICE_HEADLINE_COUNT = 5
 
 
 def dice_going_out_dates(saturday, days=DICE_WINDOW_DAYS):
@@ -1383,7 +1363,7 @@ BROOKLYN_KEYWORDS = [
     "carroll gardens", "cobble hill", "red hook", "gowanus",
     "greenpoint", "sunset park", "bay ridge", "canarsie", "east new york",
     "brownsville", "prospect", "atlantic ave", "fulton", "nostrand",
-    "dekalb", "myrtle", "fort greene park",
+    "kingston", "utica", "grand army",
 ]
 
 
@@ -1437,7 +1417,7 @@ EDIBLE_MAX_AGE_DAYS = 42   # it publishes a few stories a week; look back ~6 wee
 EDIBLE_COUNT = 3
 EDIBLE_TIERS = [
     ("Fort Greene", ["fort greene"]),
-    ("Clinton Hill",  ["clinton hill"]),
+    ("Bed-Stuy",      ["bed-stuy", "bed stuy", "bedford-stuyvesant", "bedford stuyvesant"]),
     ("Brooklyn",      ["brooklyn"] + BROOKLYN_KEYWORDS),
 ]
 
@@ -1492,6 +1472,302 @@ def fetch_edible_picks(today, limit=EDIBLE_COUNT):
         })
     picks.sort(key=lambda p: (p["tier"], -p["date"].toordinal()))
     return picks[:limit]
+
+
+# ─────────────────────────────────────────────
+# FORT GREENE COMMUNITY NEWS
+# ─────────────────────────────────────────────
+# The Fort Greene Community Organization publishes its monthly paper on a
+# Squarespace site (no RSS) as a PDF with a printed table of contents. The
+# companion page is built from that contents list — headline, byline and page
+# number, each linking to its page of the PDF — so none of it is paraphrased.
+# The one model-written element is an optional one-sentence summary per story.
+# It is generated once per issue and cached in chco-cache.json, which also
+# means the 12 MB PDF is downloaded once a month rather than every Saturday.
+#
+# The site titles each post by the month its stories cover ("October 2026");
+# the masthead inside the PDF carries the month it was published ("November
+# 2026"). The page uses the masthead's month, and picks the issue by post date.
+CHCO_ORIGIN = "https://www.chcobrooklyn.com"
+CHCO_COLLECTION_URL = f"{CHCO_ORIGIN}/chco"
+CHCO_POST_PREFIX = "Fort Greene Community News"
+CHCO_MAX_AGE_DAYS = 150      # it posts about monthly but has gone 50+ days between issues; the link stays until a newer one
+CHCO_CACHE_FILE = "chco-cache.json"
+CHCO_BLURB_MODEL = "claude-haiku-5-5"
+CHCO_UA = {"User-Agent": "WeekendDispatch/1.0 (personal newsletter)"}
+
+
+def _chco_pdf_pages(pdf_bytes):
+    """
+    Per-page text of the PDF. Poppler's pdftotext when it is installed (it keeps
+    kerned headlines intact); pypdf otherwise.
+    """
+    import io
+    import logging
+    import subprocess
+    import tempfile
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
+            f.write(pdf_bytes)
+            f.flush()
+            out = subprocess.run(["pdftotext", "-layout", f.name, "-"],
+                                 capture_output=True, check=True, timeout=120)
+        pages = out.stdout.decode("utf-8", "replace").split("\f")
+        if pages and not pages[-1].strip():
+            pages.pop()
+        if any(p.strip() for p in pages):
+            return pages
+    except (OSError, subprocess.SubprocessError):
+        pass
+    from pypdf import PdfReader
+    logging.getLogger("pypdf").setLevel(logging.ERROR)   # one font-table warning per page otherwise
+    return [(p.extract_text() or "") for p in PdfReader(io.BytesIO(pdf_bytes)).pages]
+
+
+def parse_chco_toc(pages):
+    """
+    The issue's printed "In This Issue" list as [{title, author, page}]. Each
+    line reads "Headline by Author ......... 12". Printed page numbers match the
+    PDF's own page indexes, so they can be used as #page= links.
+    """
+    start = next((i for i, p in enumerate(pages) if "IN THIS ISSUE" in p.upper()), None)
+    if start is None:
+        return []
+    rows = []
+    for line in "\n".join(pages[start:start + 2]).splitlines():
+        m = re.match(r"^\s*(.+?)\s*[_.…]{4,}\s*(\d{1,3})\s*$", line)
+        if not m:
+            continue
+        text = re.sub(r"\s+", " ", m.group(1)).strip()
+        page = int(m.group(2))
+        if not 1 <= page <= len(pages):
+            continue
+        title, author = text, ""
+        # "Women Write workshop by Katya Borkov by John DeWind" — the byline is
+        # the last "by". "Poetry edited by …" is a credit, not a byline.
+        if " by " in text:
+            head, tail = text.rsplit(" by ", 1)
+            if not re.search(r"\bedited$", head, re.I):
+                title, author = head.strip(), tail.strip()
+        rows.append({"title": title, "author": author, "page": page, "blurb": ""})
+    return rows if len(rows) >= 3 else []
+
+
+def _chco_masthead(pages):
+    """{volume, number, month} from the 'Vol.4 | No.10 | November 2026' line, or {}."""
+    # pypdf renders kerned capitals with a gap ("V ol.4"), so allow one after the V
+    m = re.search(r"V\s?ol\.?\s*(\d+)\s*\|?\s*No\.?\s*(\d+)\s*\|?\s*([A-Z][a-z]+\s+\d{4})",
+                  " ".join(pages[:2]))
+    if not m:
+        return {}
+    return {"volume": m.group(1), "number": m.group(2), "month": re.sub(r"\s+", " ", m.group(3))}
+
+
+def _chco_summary_call(client, body, articles, indices):
+    """One request for the stories at `indices`; returns {index: sentence}."""
+    contents = "\n".join(
+        f"{i + 1}. {articles[i]['title']}"
+        + (f" (by {articles[i]['author']})" if articles[i]["author"] else "")
+        + f" — page {articles[i]['page']}"
+        for i in indices
+    )
+    prompt = f"""Below is the full text of one issue of Fort Greene Community News, a monthly neighborhood paper, with page markers, followed by a list of entries from its table of contents.
+
+Write ONE plain sentence (at most 30 words) for EVERY entry in the list, saying what that story covers, using only what the story itself says. Neutral and factual, present tense. Do not add dates, times, addresses or prices unless the story states them. No opinion and no praise. For a poetry or creative-writing section, say what it is and whose work it contains, using names the issue gives. Only if you genuinely cannot find an entry in the text, use an empty string for it.
+
+Return ONLY a JSON object whose keys are the entry numbers as strings and whose values are the sentences.
+
+=== ENTRIES TO DESCRIBE ===
+{contents}
+
+=== ISSUE TEXT ===
+{body}"""
+    try:
+        response = client.messages.create(
+            model=CHCO_BLURB_MODEL,
+            max_tokens=6000,
+            output_config={"effort": "low"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        print(f"  CHCN summaries: stop_reason {response.stop_reason}; "
+              f"{response.usage.input_tokens} in / {response.usage.output_tokens} out tokens")
+        if response.stop_reason != "end_turn":
+            return {}
+        text = "".join(b.text for b in response.content if b.type == "text")
+        data = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
+    except Exception as e:
+        print(f"  CHCN summaries failed: {type(e).__name__}: {e}")
+        return {}
+    out = {}
+    for key, val in data.items():
+        try:
+            idx = int(key) - 1
+        except (TypeError, ValueError):
+            continue
+        if idx not in indices or not isinstance(val, str):
+            continue
+        val = re.sub(r"\s+", " ", val).strip()
+        if val and len(val.split()) <= 45:
+            out[idx] = val
+    return out
+
+
+def summarize_chco_articles(client, pages, articles, only=None):
+    """
+    One plain sentence per story, from the story's own text: {index: sentence}.
+    Every story is expected to get one, so anything the first request misses is
+    asked for again, once. `only` limits it to those story indexes. Returns whatever it has on any failure, because the
+    page reads fine without them. Event facts (dates, times, addresses) are only
+    repeated if the story states them, the same rule as the rest of the dispatch.
+    """
+    body = "\n\n".join(
+        f"=== PAGE {i} ===\n" + re.sub(r"[ \t]+", " ", p).strip()
+        for i, p in enumerate(pages, 1) if p.strip()
+    )
+    if len(body) > 300_000:
+        print("  CHCN: issue text too long to summarise; skipping summaries")
+        return {}
+    wanted = list(range(len(articles))) if only is None else sorted(only)
+    out = {}
+    for _attempt in (1, 2):
+        todo = [i for i in wanted if i not in out]
+        if not todo:
+            break
+        out.update(_chco_summary_call(client, body, articles, todo))
+    missing = [articles[i]["title"] for i in wanted if i not in out]
+    if missing:
+        print(f"  CHCN: no summary for {len(missing)} of {len(wanted)} stories: {'; '.join(missing)}")
+    return out
+
+def _chco_cache_load():
+    import pathlib
+    try:
+        return json.loads((pathlib.Path.cwd() / CHCO_CACHE_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _chco_cache_save(pdf_url, masthead, n_pages, articles, attempts=0, meta=None):
+    import pathlib
+    data = {"pdf_url": pdf_url, "masthead": masthead, "pages": n_pages,
+            "summary_attempts": attempts, **(meta or {}), "articles": articles}
+    (pathlib.Path.cwd() / CHCO_CACHE_FILE).write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def fetch_chco_issue(today, client=None):
+    """
+    The newest Fort Greene Community News issue as a dict, or None when the
+    site is unreachable, has nothing recent, or the PDF can't be read. Never
+    raises: the page is an extra, and a failure here must not hold up the send.
+    `client` (an Anthropic client) is only used for the optional summaries.
+    """
+    try:
+        issue = _fetch_chco_issue(today, client)
+    except Exception as e:
+        print(f"  CHCN: live check failed ({type(e).__name__}: {e}); using the saved issue")
+        issue = None
+    # The link to the Community News page should not come and go with the site's
+    # availability, so fall back to the issue saved on the last good run.
+    return issue or _chco_issue_from_cache(today)
+
+
+def _chco_issue_from_cache(today):
+    """The issue saved by the last successful run, or None if there isn't a recent one."""
+    c = _chco_cache_load()
+    if not (c.get("articles") and c.get("posted") and c.get("pdf_url")):
+        return None
+    posted = datetime.date.fromisoformat(c["posted"])
+    if (today - posted).days > CHCO_MAX_AGE_DAYS:
+        return None
+    m = c.get("masthead", {})
+    return {"post_title": c.get("post_title", ""), "post_url": c.get("post_url", CHCO_COLLECTION_URL),
+            "pdf_url": c["pdf_url"], "posted": posted, "volume": m.get("volume", ""),
+            "number": m.get("number", ""), "month": m.get("month") or posted.strftime("%B %Y"),
+            "pages": c.get("pages", 0), "articles": c["articles"]}
+
+
+def _fetch_chco_issue(today, client):
+    from urllib.parse import urljoin
+    from zoneinfo import ZoneInfo
+
+    # Squarespace serves any collection as JSON with ?format=json
+    r = requests.get(CHCO_COLLECTION_URL, params={"format": "json"}, headers=CHCO_UA, timeout=30)
+    r.raise_for_status()
+    posts = [i for i in r.json().get("items", [])
+             if (i.get("title") or "").startswith(CHCO_POST_PREFIX)]
+    if not posts:
+        print("  CHCN: no issue posts found")
+        return None
+
+    def stamp(post):
+        return post.get("publishOn") or post.get("addedOn") or 0
+
+    post = max(posts, key=stamp)
+    posted = datetime.datetime.fromtimestamp(stamp(post) / 1000, ZoneInfo(TIMEZONE)).date()
+    age = (today - posted).days
+    if age > CHCO_MAX_AGE_DAYS:
+        print(f"  CHCN: newest issue ({post['title']}) was posted {age} days ago; too old to show")
+        return None
+    found = re.search(r"""(?:https?://[^"'\s<>]+)?/s/[^"'\s<>]+\.pdf""", post.get("body") or "")
+    if not found:
+        print(f"  CHCN: no PDF on {post['title']}")
+        return None
+    pdf_url = urljoin(CHCO_ORIGIN, found.group(0))
+
+    # The issue never changes once posted, so reuse what we parsed last time and
+    # only fetch the PDF for a new issue, or to add summaries that are missing
+    # (at most three tries per issue; CHCO_REGENERATE=1 redoes them all).
+    cache = _chco_cache_load()
+    cached = cache.get("pdf_url") == pdf_url and cache.get("articles")
+    articles = cache["articles"] if cached else None
+    masthead = cache.get("masthead", {}) if cached else {}
+    n_pages = cache.get("pages", 0) if cached else 0
+    attempts = cache.get("summary_attempts", 0) if cached else 0
+    regenerate = client is not None and os.environ.get("CHCO_REGENERATE") == "1"
+    want = [i for i, a in enumerate(articles or []) if regenerate or not a.get("blurb")]
+    if not articles or (client is not None and want and (regenerate or attempts < 3)):
+        try:
+            pdf = requests.get(pdf_url, headers=CHCO_UA, timeout=120)
+            pdf.raise_for_status()
+            if not pdf.content.startswith(b"%PDF") or len(pdf.content) > 60_000_000:
+                raise ValueError("unexpected file at the PDF link")
+            pages = _chco_pdf_pages(pdf.content)
+        except Exception:
+            if not articles:
+                raise
+            print("  CHCN: couldn't re-read the PDF; using the cached contents")
+        else:
+            if not articles:
+                articles = parse_chco_toc(pages)
+                masthead = _chco_masthead(pages)
+                n_pages = len(pages)
+                want = list(range(len(articles)))
+            if not articles:
+                print("  CHCN: couldn't find a table of contents in the PDF")
+                return None
+            if client is not None and want:
+                blurbs = summarize_chco_articles(client, pages, articles, want)
+                for i in want:
+                    articles[i]["blurb"] = blurbs.get(i, articles[i].get("blurb", ""))
+                attempts += 1
+
+    post_url = urljoin(CHCO_ORIGIN, post.get("fullUrl", "/chco"))
+    if articles:   # identical bytes unless something changed, so git sees no diff on quiet weeks
+        _chco_cache_save(pdf_url, masthead, n_pages, articles, attempts,
+                         {"post_title": post["title"], "post_url": post_url, "posted": posted.isoformat()})
+    month = masthead.get("month") or post["title"].split(" - ", 1)[-1]
+    return {
+        "post_title": post["title"],
+        "post_url": post_url,
+        "pdf_url": pdf_url,
+        "posted": posted,
+        "volume": masthead.get("volume", ""),
+        "number": masthead.get("number", ""),
+        "month": month,
+        "pages": n_pages,
+        "articles": articles,
+    }
 
 
 def _score_brooklyn_edginess(item):
@@ -1575,9 +1851,9 @@ def generate_narrative(
     brooklyn_news,
     client,
 ):
-    # NOTE: The MTA, Sample Hall, and On Sale This Weekend sections are not
+    # NOTE: The MTA, Public Records, and On Sale This Weekend sections are not
     # written by Claude. All three are rendered directly from structured data
-    # (see fetch_mta_alerts / build_mta_section_html, fetch_sample_hall_events,
+    # (see fetch_mta_alerts / build_mta_section_html, fetch_public_records_events,
     # and fetch_dice_events), so this narrative covers the other three sections
     # only. Keeping event facts out of the model is deliberate: times, prices,
     # and venues should never be paraphrased.
@@ -1640,13 +1916,13 @@ def generate_narrative(
 
     news_text = "\n\n".join(news_sections)
 
-    prompt = f"""You are writing the Fort Greene Weekend Dispatch — a single, tightly-written Saturday morning email for Alex, a Fort Greene resident with a small dark-coated dog named Biscuit (~20 lbs).
-He lives near DeKalb Ave and Washington Park. Union Square Greenmarket is a 1-hour walk with Biscuit.
+    prompt = f"""You are writing the Fort Greene Weekend Dispatch — a single, tightly-written Saturday morning email for Alex, a Fort Greene resident with a small black dog named Biscuit (~20 lbs).
+He lives near {NEIGHBORHOOD} Park. The Sample Greenmarket is a 1-hour walk with {READER_DOG}.
 
 Write in plain, direct prose. No markdown headers. No bullet lists. Five sections, each with a clear label line then 2–4 sentences of narrative. Be specific and useful, not generic.
 
 === WEATHER DATA ===
-SATURDAY ({sat_str}):
+{"" if saturday_data else "NOTE: the forecast could not be fetched this run. Say so plainly in one sentence, and do not guess at temperatures, rain or walk windows." + chr(10) + chr(10)}SATURDAY ({sat_str}):
   High: {saturday_data.get('high_f', '?')}°F  Low: {saturday_data.get('low_f', '?')}°F
   Conditions: {WMO_CODES.get(saturday_data.get('weather_code', 0), 'Unknown')}
   Max rain chance: {saturday_data.get('rain_pct_max', '?')}%
@@ -1663,13 +1939,13 @@ SUNDAY BISCUIT WALK WINDOWS:
 {fmt_windows(sun_windows)}
 
 === FARMERS MARKET ===
-Union Square Greenmarket verdict: {market_result['verdict']}
+Sample Greenmarket verdict: {market_result['verdict']}
 Reason: {market_result['reason']}
 Sustained average temp during outing window: {market_avg_str} (peak {market_peak_str})
 Market hours: {market_result['market_hours']}
 Other Brooklyn Saturday markets found: {', '.join(market_names)}
 
-IN-SEASON PRODUCE AT UNION SQUARE PLAZA THIS MONTH:
+IN-SEASON PRODUCE AT SAMPLE GREENMARKET THIS MONTH:
 {get_seasonal_produce(saturday)}
 
 === BROOKLYN CULTURE NEWS ===
@@ -1684,12 +1960,12 @@ sci-fi, investigative journalism, bikes/surf/street culture, food, left politics
 
 === INSTRUCTIONS ===
 
-Write the dispatch in three labeled sections (the MTA and Sample Hall sections are generated separately — do NOT write them):
+Write the dispatch in three labeled sections (the MTA and Public Records sections are generated separately — do NOT write them):
 
 WEATHER + BISCUIT
 2–3 sentences covering both days. Alex's default is leaving home between 10am and noon on weekends — he is not getting up at 6am unless forced. Work from that assumption. If the walk window data shows [RAIN FORCES EARLIER START], acknowledge that plainly and tell him rain is arriving mid-morning so he'll need to move if he wants to get Biscuit out dry. If the 10am–noon window is just hot (not rainy), tell him what to expect at that hour and how to manage it with Biscuit. Always include the evening window as a second option. Be specific about Saturday vs Sunday if they differ.
 
-UNION SQUARE GREENMARKET
+SAMPLE GREENMARKET
 2–3 sentences. Lead with the verdict. Then name 2–3 specific produce picks that are peak right now and worth grabbing — be concrete and specific (e.g., "the Sungold tomatoes and garlic scapes" not just "tomatoes and garlic"). If no-go or caution, still name the best picks so he knows what to grab on a better week or a solo trip, then suggest one concrete indoor Brooklyn fallback.
 
 AROUND BROOKLYN
@@ -1740,8 +2016,8 @@ def _extract_recommended_lines(text):
     """
     Pull a recommended line out of alert text like 'Take the [A] instead' or
     'use the [A]'. MTA brackets routes, e.g. [A]. Returns the recommended
-    C/G line letters in mention order (deduped); other lines are ignored
-    because the alternate lookup only covers C/G.
+    A/C/3 line letters in mention order (deduped); other lines are ignored
+    because the alternate lookup only covers A/C/3.
     """
     import re
     recs = []
@@ -1763,7 +2039,7 @@ def _recommend_alternate(station, statuses, disrupted_lines, affected_stops):
       (a) the OTHER home station, if it isn't affected this weekend;
       (b) a line the alert explicitly recommends ('take the [A]') -> nearest
           ALTERNATE_STATIONS entry serving that (still-running) line;
-      (c) otherwise the nearest other station on a running C/G service;
+      (c) otherwise the nearest other station on a running A/C/3 service;
       (d) if everything nearby is disrupted, say so.
     Returns a plain-English sentence. `disrupted_lines` are lines with a
     weekend-active whole-line change; `affected_stops` are directly-named stops.
@@ -1798,7 +2074,7 @@ def _recommend_alternate(station, statuses, disrupted_lines, affected_stops):
                 return (f'The alert points you to the [{rl}] — nearest is '
                         f'{entry["name"]} ({entry["walk"]}).')
 
-    # (c) nearest other station on a running C/G service
+    # (c) nearest other station on a running A/C/3 service
     for entry in ALTERNATE_STATIONS:
         if entry["stop_id"] == home_id:
             continue
@@ -1808,15 +2084,14 @@ def _recommend_alternate(station, statuses, disrupted_lines, affected_stops):
                     f'([{running}], {entry["walk"]}).')
 
     # (d) nothing nearby is running
-    return ("Every nearby C/G station is disrupted this weekend — "
+    return ("Every nearby A/C/3 station is disrupted this weekend — "
             "check the MTA app before you head out.")
 
 
 def build_home_station_banner(alerts):
     """
-    Build the home-station status banner from the weekend-active C/G alerts,
-    considering EXACTLY the two BANNER_STATIONS (Lafayette Av [C] and
-    Fulton St [G]).
+    Build the home-station status banner from the weekend-active A/C/3 alerts,
+    considering EXACTLY the two BANNER_STATIONS.
 
     A station is "touched" if an alert names its stop directly, or a whole-line
     (line-level) change hits its line. All-clear renders one calm line in the
@@ -1870,9 +2145,9 @@ def build_home_station_banner(alerts):
 
 def build_mta_section_html(alerts, surface_alerts):
     """
-    Render the MTA section body: a home-station status banner on top, then a
-    single 'Service changes on the home lines' list of every weekend-active
-    change (flat — no your/elsewhere grouping), reusing the .news-item cards.
+    Render the MTA section body: a home-station status banner on top, then the
+    weekend-active changes grouped under the A, C and 3 (plain wording, with
+    when each applies), reusing the .news-item cards.
     Surface-transit disruptions, when present, follow underneath (unchanged
     'only if disrupted' rule).
     """
@@ -1888,27 +2163,12 @@ def build_mta_section_html(alerts, surface_alerts):
         if not _is_extra_service(a):
             return False
         mentioned = set(_re.findall(r'\[([A-Z0-9]+)\]', a.get("text", "")))
-        return bool(mentioned - set(HOME_LINES))
+        return bool(mentioned - {"A", "C", "3"})
     change_alerts = [a for a in alerts if not _is_system_wide(a)]
-    if change_alerts:
-        cards = ""
-        for a in change_alerts:
-            # One card per alert; each route gets its own label row (no "A/C" mashup).
-            route_labels = "".join(
-                f'<div class="news-source">{_html.escape(r)} line</div>'
-                for r in (a.get("routes", []) or [])
-            )
-            cards += f"""
-            <div class="news-item">
-              {route_labels}
-              <div class="news-hed">{_html.escape(a["text"])}</div>
-            </div>"""
-        if cards:
-            html += f"""
-          <div class="mta-group">
-            <div class="mta-group-label">Service changes on the {' &amp; '.join(HOME_LINES)}</div>
-            <div class="news-feed">{cards}</div>
-          </div>"""
+    # One heading per home line (A, C, 3), each change in plain wording with the
+    # days and hours it applies; a line with nothing planned says so.
+    html += f"""
+          <div class="mta-groups">{mw.render_home_lines(change_alerts)}</div>"""
 
     # Surface transit — conditional, only when a service is actually disrupted.
     if surface_alerts:
@@ -1931,14 +2191,14 @@ def build_mta_section_html(alerts, surface_alerts):
 # Pigeon artwork lives in assets/ and is served from GitHub Pages so both the
 # emailed envelope and the hosted newsletter can load it by absolute URL.
 #   pigeon-grey.png — plain silhouette, tiled faintly behind the newsletter
-#   pigeon-grey.png — also used on the envelope stamp in this copy
+#   pigeon-grey.png   — blue-jacket "ZT" pigeon, used on the envelope stamp
 ASSET_BASE_URL = os.environ.get(
     "WEEKEND_ASSET_BASE_URL",
-    "https://YOUR-ORG.github.io/weekend-dispatch-showcase/assets",
+    "https://your-username.github.io/weekend-dispatch/assets",
 ).rstrip("/")
 PIGEON_GREY_URL = f"{ASSET_BASE_URL}/pigeon-grey.png"
-PIGEON_STAMP_URL = f"{ASSET_BASE_URL}/pigeon-grey.png"
-CREST_URL = f"{ASSET_BASE_URL}/crest-placeholder.png"   # neutral placeholder crest for the newsletter footer
+PIGEON_ZT_URL = f"{ASSET_BASE_URL}/pigeon-grey.png"
+ZT_CREST_URL = f"{ASSET_BASE_URL}/crest-placeholder.png"   # gold crest, transparent, for the newsletter footer
 
 
 # ─────────────────────────────────────────────
@@ -2050,7 +2310,7 @@ NATURE_BIRDS = [
         "facts": [
             ("Where", "On lawns and meadows, probing for ants; peaks in NYC during fall migration."),
             ("ID", "Brown with black barring, a black bib, a spotted belly, and a bright white rump in flight."),
-            ("East vs west", "Eastern birds flash yellow under the wings; western birds, like the ones on the Pacific coast, flash red."),
+            ("East vs west", "Eastern birds flash yellow under the wings; western birds, like the ones around UBC, flash red."),
             ("Range", "Across North America; the two colour forms meet and hybridize on the Great Plains."),
         ],
         "conservation": "Still widespread but slowly declining. It needs dead trees (snags) to nest in, and those are the first thing removed from tidy parks and yards.",
@@ -2076,7 +2336,7 @@ NATURE_BIRDS = [
         "tagline": "The Pacific Northwest&rsquo;s signature rainforest thrush",
         "wiki": "Varied thrush",
         "facts": [
-            ("Where", "Damp, mossy conifer forest. Pacific Spirit Regional Park in Vancouver is classic habitat, especially in winter."),
+            ("Where", "Damp, mossy conifer forest. Pacific Spirit Regional Park next to UBC is classic habitat, especially in winter."),
             ("ID", "Robin-sized, with orange throat, eyebrow and wing bars, and a dark band across the breast."),
             ("Voice", "A single long, buzzy, eerie whistle on one pitch, then another on a different pitch."),
             ("Range", "Coastal forests from Alaska to northern California. In the Northeast it is a rare winter stray."),
@@ -2091,7 +2351,7 @@ NATURE_BIRDS = [
         "tagline": "British Columbia&rsquo;s provincial bird",
         "wiki": "Steller's jay",
         "facts": [
-            ("Where", "Conifer forests and leafy neighbourhoods across coastal B.C., including Vancouver&rsquo;s parks."),
+            ("Where", "Conifer forests and leafy neighbourhoods across coastal B.C., including the UBC campus."),
             ("ID", "A charcoal-black head and tall crest over deep blue wings and tail."),
             ("Voice", "Harsh &ldquo;shack-shack-shack&rdquo; calls, and a convincing Red-tailed Hawk impression."),
             ("Range", "Western North America, from Alaska to Central America; the western counterpart of the Blue Jay."),
@@ -2107,7 +2367,7 @@ NATURE_TREES = [
         "photo_file": "American Elm Tree, Old South Street, Northampton, MA - October 2019.jpg",
         "photo_note": "&ldquo;Ed Cotton&rsquo;s elm,&rdquo; Northampton, Mass., October 2019",
         "facts": [
-            ("Where", "Closer than you think: several line the blocks around Fort Greene Park."),
+            ("Where", "Look for it along older boulevards and at the edges of parks."),
             ("Shape", "The classic <em>vase</em>: the trunk splits low into several upright limbs that arch outward into a wide, drooping crown."),
             ("Leaf", "Doubly toothed with a lopsided base: one side of the blade starts lower on the stalk than the other. Yellow in fall."),
             ("Bark trick", "Cut a small chip of outer bark and look at it in cross-section. Alternating light and dark layers means American elm; slippery elm is solid brown."),
@@ -2179,7 +2439,7 @@ NATURE_TREES = [
         "tagline": "British Columbia&rsquo;s provincial tree",
         "wiki": "Thuja plicata",
         "facts": [
-            ("Where", "Moist lowland forest across coastal B.C., including Pacific Spirit Regional Park in Vancouver."),
+            ("Where", "Moist lowland forest across coastal B.C., including Pacific Spirit Regional Park by UBC."),
             ("Foliage", "Flat sprays of tiny scale-leaves. Underneath, the white markings form a small &ldquo;bowtie&rdquo; pattern."),
             ("Bark", "Reddish, fibrous and stringy, peeling in long vertical strips."),
             ("Range", "Pacific coast from southeast Alaska to northern California, plus the interior wet belt."),
@@ -2227,7 +2487,7 @@ NATURE_TREES = [
 THEN_AND_NOW = [
     {
         "hed": "You live on a glacier&rsquo;s leftovers",
-        "then": "Central Brooklyn sits on the <strong>Harbor Hill terminal moraine</strong>, the ridge of rock and gravel the last ice sheet dumped when it stopped here roughly 20,000 years ago. Eastern Parkway rides its crest. South of it lies Flatbush&rsquo;s flat outwash plain. This was Lenape land. In the 1800s the ridge was called <strong>Crow Hill</strong>. At its eastern edge, <strong>Weeksville</strong> (founded 1838) became one of the country&rsquo;s largest free Black communities.",
+        "then": "Fort Greene sits on the <strong>Harbor Hill terminal moraine</strong>, the ridge of rock and gravel the last ice sheet dumped when it stopped here roughly 20,000 years ago. Eastern Parkway rides its crest. South of it lies Flatbush&rsquo;s flat outwash plain. This was Lenape land. In the 1800s the ridge was called <strong>Crow Hill</strong>. At its eastern edge, <strong>Weeksville</strong> (founded 1838) became one of the country&rsquo;s largest free Black communities.",
         "now": "The moraine still sets the terrain: the Brooklyn Museum&rsquo;s Mount Prospect and the ridge in Prospect Park are the same landform. Its passes decided the Battle of Brooklyn in 1776, when the British flanked the American line through Jamaica Pass. Almost nothing of the moraine&rsquo;s original oak forest survives except fragments like the Park&rsquo;s Ravine.",
     },
     {
@@ -2329,16 +2589,7 @@ def fetch_wiki_photo(title=None, file=None):
         return None
 
 
-def _nature_section(label, roman, inner):
-    return f"""
-        <div class="b4-section">
-          <div class="b4-label-row">
-            <span class="b4-label">{label}</span>
-            <div class="b4-label-rule"></div>
-            <span class="b4-label-roman">{roman}</span>
-          </div>
-{inner}
-        </div>"""
+
 
 
 def _species_card(entry):
@@ -2371,37 +2622,38 @@ def _species_card(entry):
 
 # Map of the Week: one Brooklyn or Manhattan neighbourhood per Saturday, on a
 # USGS aerial photo, with a 10-20-30 rule check and the five biggest trunks
-# starred. Rotation alternates boroughs, alphabetical within each (78 weeks).
+# starred. Rotation alternates boroughs, nearest-to-home first (78 weeks).
 ROTATION_START = datetime.date(2026, 10, 3)
 TREE_MAP_ROTATION = [
-    ("BK27", "Bath Beach"), ("MN25", "Battery Park City-Lower Manhattan"), ("BK31", "Bay Ridge"),
-    ("MN03", "Central Harlem North-Polo Grounds"), ("BK75", "Bedford"), ("MN11", "Central Harlem South"),
-    ("BK29", "Bensonhurst East"), ("MN27", "Chinatown"), ("BK28", "Bensonhurst West"),
-    ("MN15", "Clinton"), ("BK88", "Borough Park"), ("MN34", "East Harlem North"),
-    ("BK19", "Brighton Beach"), ("MN33", "East Harlem South"), ("BK09", "Brooklyn Heights-Cobble Hill"),
-    ("MN22", "East Village"), ("BK81", "Brownsville"), ("MN21", "Gramercy"),
-    ("BK77", "Bushwick North"), ("MN04", "Hamilton Heights"), ("BK78", "Bushwick South"),
-    ("MN13", "Hudson Yards-Chelsea-Flatiron-Union Square"), ("BK50", "Canarsie"), ("MN31", "Lenox Hill-Roosevelt Island"),
-    ("BK33", "Carroll Gardens-Columbia Street-Red Hook"), ("MN14", "Lincoln Square"), ("BK69", "Clinton Hill"),
-    ("MN28", "Lower East Side"), ("BK61", "Fort Greene North"), ("MN06", "Manhattanville"),
-    ("BK63", "Fort Greene South"), ("MN01", "Marble Hill-Inwood"), ("BK83", "Cypress Hills-City Line"),
-    ("MN17", "Midtown-Midtown South"), ("BK38", "DUMBO-Vinegar Hill-Downtown Brooklyn-Boerum Hill"), ("MN09", "Morningside Heights"),
-    ("BK30", "Dyker Heights"), ("MN20", "Murray Hill-Kips Bay"), ("BK91", "East Flatbush-Farragut"),
-    ("MN24", "SoHo-TriBeCa-Civic Center-Little Italy"), ("BK82", "East New York"), ("MN50", "Stuyvesant Town-Cooper Village"),
-    ("BK85", "East New York (Pennsylvania Ave)"), ("MN19", "Turtle Bay-East Midtown"), ("BK90", "East Williamsburg"),
-    ("MN40", "Upper East Side-Carnegie Hill"), ("BK95", "Erasmus"), ("MN12", "Upper West Side"),
-    ("BK42", "Flatbush"), ("MN35", "Washington Heights North"), ("BK58", "Flatlands"),
-    ("MN36", "Washington Heights South"), ("BK68", "Fort Greene"), ("MN23", "West Village"),
-    ("BK45", "Georgetown-Marine Park-Bergen Beach-Mill Basin"), ("MN32", "Yorkville"), ("BK26", "Gravesend"),
-    ("BK76", "Greenpoint"), ("BK25", "Homecrest"), ("BK41", "Kensington-Ocean Parkway"),
-    ("BK44", "Madison"), ("BK43", "Midwood"), ("BK73", "North Side-South Side"),
-    ("BK79", "Ocean Hill"), ("BK46", "Ocean Parkway South"), ("BK37", "Park Slope-Gowanus"),
-    ("BK64", "Prospect Heights"), ("BK60", "Prospect Lefferts Gardens-Wingate"), ("BK96", "Rugby-Remsen Village"),
-    ("BK21", "Seagate-Coney Island"), ("BK17", "Sheepshead Bay-Gerritsen Beach-Manhattan Beach"), ("BK93", "Starrett City"),
-    ("BK35", "Stuyvesant Heights"), ("BK34", "Sunset Park East"), ("BK32", "Sunset Park West"),
-    ("BK23", "West Brighton"), ("BK72", "Williamsburg"), ("BK40", "Windsor Terrace"),
+    ("BK61", "Fort Greene North"), ("MN28", "Lower East Side"), ("BK63", "Fort Greene South"),
+    ("MN25", "Battery Park City-Lower Manhattan"), ("BK35", "Stuyvesant Heights"), ("MN27", "Chinatown"),
+    ("BK60", "Prospect Lefferts Gardens-Wingate"), ("MN50", "Stuyvesant Town-Cooper Village"),
+    ("BK64", "Prospect Heights"), ("MN22", "East Village"), ("BK69", "Clinton Hill"),
+    ("MN20", "Murray Hill-Kips Bay"), ("BK75", "Bedford"), ("MN24", "SoHo-TriBeCa-Civic Center-Little Italy"),
+    ("BK79", "Ocean Hill"), ("MN21", "Gramercy"), ("BK78", "Bushwick South"),
+    ("MN19", "Turtle Bay-East Midtown"), ("BK96", "Rugby-Remsen Village"), ("MN23", "West Village"),
+    ("BK95", "Erasmus"), ("MN17", "Midtown-Midtown South"), ("BK81", "Brownsville"),
+    ("MN31", "Lenox Hill-Roosevelt Island"), ("BK72", "Williamsburg"),
+    ("MN13", "Hudson Yards-Chelsea-Flatiron-Union Square"), ("BK77", "Bushwick North"), ("MN15", "Clinton"),
+    ("BK68", "Fort Greene"), ("MN40", "Upper East Side-Carnegie Hill"), ("BK91", "East Flatbush-Farragut"),
+    ("MN32", "Yorkville"), ("BK37", "Park Slope-Gowanus"), ("MN14", "Lincoln Square"),
+    ("BK85", "East New York (Pennsylvania Ave)"), ("MN33", "East Harlem South"), ("BK40", "Windsor Terrace"),
+    ("MN12", "Upper West Side"), ("BK90", "East Williamsburg"), ("MN34", "East Harlem North"),
+    ("BK38", "DUMBO-Vinegar Hill-Downtown Brooklyn-Boerum Hill"), ("MN11", "Central Harlem South"),
+    ("BK42", "Flatbush"), ("MN09", "Morningside Heights"), ("BK73", "North Side-South Side"),
+    ("MN06", "Manhattanville"), ("BK09", "Brooklyn Heights-Cobble Hill"),
+    ("MN03", "Central Harlem North-Polo Grounds"), ("BK41", "Kensington-Ocean Parkway"),
+    ("MN04", "Hamilton Heights"), ("BK83", "Cypress Hills-City Line"), ("MN36", "Washington Heights South"),
+    ("BK82", "East New York"), ("MN35", "Washington Heights North"), ("BK58", "Flatlands"),
+    ("MN01", "Marble Hill-Inwood"), ("BK50", "Canarsie"),
+    ("BK33", "Carroll Gardens-Columbia Street-Red Hook"), ("BK93", "Starrett City"), ("BK76", "Greenpoint"),
+    ("BK43", "Midwood"), ("BK32", "Sunset Park West"), ("BK88", "Borough Park"), ("BK34", "Sunset Park East"),
+    ("BK46", "Ocean Parkway South"), ("BK45", "Georgetown-Marine Park-Bergen Beach-Mill Basin"),
+    ("BK44", "Madison"), ("BK25", "Homecrest"), ("BK30", "Dyker Heights"), ("BK28", "Bensonhurst West"),
+    ("BK31", "Bay Ridge"), ("BK29", "Bensonhurst East"),
+    ("BK17", "Sheepshead Bay-Gerritsen Beach-Manhattan Beach"), ("BK27", "Bath Beach"), ("BK26", "Gravesend"),
+    ("BK19", "Brighton Beach"), ("BK23", "West Brighton"), ("BK21", "Seagate-Coney Island"),
 ]
-# HOME_LATLON comes from sample_profile.py
 NTA_LAYER_URL = ("https://services5.arcgis.com/GfwWNkhOj9bNBqoJ/arcgis/rest/services/"
                  "NYC_Neighborhood_Tabulation_Areas_2010/FeatureServer/0/query")
 TREE_POINTS_URL = "https://data.cityofnewyork.us/resource/hn5i-inap.json"    # NYC Parks Forestry Tree Points (live)
@@ -3029,58 +3281,64 @@ def build_shore_leave_html(saturday):
     facts = "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in entry["facts"])
     cons = (f'<div class="xs-box"><div class="xs-box-label">Conservation angle</div><p>{entry["conservation"]}</p></div>'
             if entry.get("conservation") else "")
+    try:
+        sound_html = dm.shore_sound_html(saturday)      # a different open-licence sea recording each week
+    except Exception as e:
+        sound_html = ""
+        print(f"  [shore] sound skipped: {e}")
     body += f"""
+          {dm.waves_html()}
           <div class="sl-kicker">{entry["kicker"]}</div>
           <div class="xs-hed">{entry["name"]}</div>
           <div class="xs-sub">{entry["tagline"]}</div>
           {photo_html}
+          {sound_html}
           <dl class="xs-kv">{facts}</dl>{cons}"""
     return body
 
 
-def build_nature_sections_html(saturday):
+def build_nature_pieces(saturday):
     """
-    Bird of the Week, Tree of the Week, Map of the Week, Then & Now.
-    Each is independent and fail-closed: an error drops that one section.
+    Bird of the Week, Tree of the Week, Map of the Week, Then & Now and Shore
+    Leave as {key: (label, inner_html)}. Each is independent and fail-closed: an
+    error drops that one piece.
     """
-    out = []
-    romans = iter(["vii.", "viii.", "ix.", "x.", "xi.", "xii."])
+    out = {}
     month = saturday.month
 
     birds = [b for b in NATURE_BIRDS if month in b["months"]]
-    for label, bank, salt in (("Bird of the Week", birds, 0), ("Tree of the Week", NATURE_TREES, 3)):
+    for key, label, bank, salt in (("bird", "Bird of the Week", birds, 0), ("tree", "Tree of the Week", NATURE_TREES, 3)):
         try:
             entry = _week_pick(bank, saturday, salt)
             if entry:
-                out.append(_nature_section(label, next(romans), _species_card(entry)))
+                out[key] = (label, _species_card(entry))
         except Exception as e:
             print(f"  [nature] {label} skipped: {e}")
 
     try:
-        out.append(_nature_section("Map of the Week", next(romans),
-                                   build_tree_map_html(map_of_the_week(saturday))))
+        out["map"] = ("Map of the Week", build_tree_map_html(map_of_the_week(saturday)))
     except Exception as e:
         print(f"  [nature] Map of the Week skipped: {e}")
 
     try:
         tn = _week_pick(THEN_AND_NOW, saturday, 1)
-        out.append(_nature_section("Then &amp; Now", next(romans), f"""
+        out["then_now"] = ("Then &amp; Now", f"""
           <div class="xs-hed">{tn["hed"]}</div>
           <div class="xs-cols">
             <div><div class="xs-col-label">Then</div><p>{tn["then"]}</p></div>
             <div><div class="xs-col-label">Now</div><p>{tn["now"]}</p></div>
-          </div>"""))
+          </div>""")
     except Exception as e:
         print(f"  [nature] Then & Now skipped: {e}")
 
     try:
         shore = build_shore_leave_html(saturday)
         if shore.strip():
-            out.append(_nature_section("Shore Leave", next(romans), shore))
+            out["shore"] = ("Shore Leave", shore)
     except Exception as e:
         print(f"  [nature] Shore Leave skipped: {e}")
 
-    return "".join(out)
+    return out
 
 
 NATURE_CSS = """
@@ -3126,9 +3384,145 @@ NATURE_CSS = """
 """
 
 
+def public_records_as_picks(pr_events):
+    """
+    Public Records' shows in the same shape as the DICE picks, so they can sit in the On Sale list. Each keeps
+    its artists (the linked title) and its "time @ room" line word for word; its start time comes from that line.
+    """
+    import re as _re
+    out = []
+    for e in pr_events or []:
+        d = e.get("date")
+        if not d:
+            continue
+        parts = [p.strip() for p in e.get("text", "").split(" — ")]
+        time_room = parts[2] if len(parts) > 2 else ""
+        artists = " — ".join(parts[3:]) if len(parts) > 3 else ""
+        m = _re.search(r"(\d{1,2}):(\d{2})\s*(am|pm)", time_room, _re.I)
+        if m:
+            hour = int(m.group(1)) % 12 + (12 if m.group(3).lower() == "pm" else 0)
+            start = datetime.datetime(d.year, d.month, d.day, hour, int(m.group(2)))
+        else:
+            start = datetime.datetime(d.year, d.month, d.day, 23, 59)
+        out.append({
+            "name": artists or time_room, "url": e.get("url", ""), "start": start,
+            "has_time": bool(m), "venue": "Public Records", "tracked_venue": "Public Records",
+            "artists": [], "price": "", "sold_out": False,
+            "dek": time_room if artists else "", "public_records": True,
+            # a show listed at 12-4 am belongs to the end of that night, not the start of the day
+            "sort_start": start + datetime.timedelta(days=1) if (m and start.hour < 5) else start,
+        })
+    return out
+
+
+def on_sale_lineup(dice_picks, pr_events):
+    """The On Sale list: the DICE picks and Public Records' shows together, in the order they start."""
+    key = lambda e: (e.get("sort_start") or e["start"]).replace(tzinfo=None)    # compare wall-clock times
+    return sorted(list(dice_picks or []) + public_records_as_picks(pr_events), key=key)
+
+
+def news_feature_html(roman, news_url, items_html):
+    """
+    The News & Culture section of the main page: a masthead band in the page's own colours that echoes the News &
+    Culture page's (the brownstone drawing and the title) with a button, then the five newest headlines under a
+    section-mark label. The whole masthead is a link to the edition.
+    """
+    import html as _html
+    url = _html.escape(news_url, quote=True)
+    return f"""
+        <div class="b4-section nc-feature">
+          <a class="nc-masthead" href="{url}">
+            <div class="nc-kicker">No. {roman.rstrip('.')} &middot; The weekend&rsquo;s reading</div>
+            <div class="nc-vignette" aria-hidden="true">{dp.VIGNETTE_SVG}</div>
+            <div class="nc-title">News &amp; Culture</div>
+            <span class="nc-cta">Read the full edition &rarr;</span>
+          </a>
+          <div class="news-subhead">From this week&rsquo;s edition</div>
+          <div class="news-feed">{items_html}</div>
+        </div>"""
+
+
+def build_nature_report_html(inat_html, nature):
+    """
+    The Nature Report section body: this week's iNaturalist sightings, then Bird, Tree and Map of the Week as
+    sub-sections (each under a section-mark label, in the style of the page's other group labels). Returns ""
+    when there is nothing at all, so the section is left out; it still appears if only one part is available.
+    """
+    html = inat_html or ""
+    for key in ("bird", "tree", "map"):
+        piece = (nature or {}).get(key)
+        if piece:
+            html += f'<div class="nature-sub"><div class="news-subhead">{piece[0]}</div>{piece[1]}</div>'
+    return html
+
+
+def _nature_section(label, roman, inner):
+    return f"""
+        <div class="b4-section">
+          <div class="b4-label-row">
+            <span class="b4-label">{label}</span>
+            <div class="b4-label-rule"></div>
+            <span class="b4-label-roman">{roman}</span>
+          </div>
+{inner}
+        </div>"""
+
+
+# a raw string: the CSS has escapes like \00A7 that Python must not interpret
+DESIGN_CSS = r"""
+  /* Section headers, group labels and the small lines above items: newspaper rules, a typewriter headline with
+     the numeral in a ring, italic serif group labels with a section mark, a square bullet on item lines.
+     Prefixed with .b4-wrap so it wins over the base rules whatever their order. */
+  .b4-wrap .news-subhead { border-top: 0; padding-top: 0; }
+  .b4-wrap .b4-section { padding: 36px 0 26px; }
+  .b4-wrap .b4-label-row { display: grid; grid-template-columns: 48px 1fr; column-gap: 14px; align-items: center; margin-bottom: 22px; padding: 12px 0;
+    border-top: 4px solid #1A1208; border-bottom: 1px solid #1A1208; box-shadow: 0 -3px 0 #F5EDD8, 0 -4px 0 #1A1208; }
+  .b4-wrap .b4-label-roman { grid-column: 1; grid-row: 1; width: 46px; height: 46px; border: 2px solid #9B3A1A; border-radius: 50%; display: flex;
+    align-items: center; justify-content: center; font-size: 20px; color: #9B3A1A; opacity: 1; padding-right: 2px; }
+  .b4-wrap .b4-label { grid-column: 2; grid-row: 1; font-family: 'Special Elite', 'Courier Prime', monospace; font-size: 27px; letter-spacing: 0;
+    text-transform: none; color: #1A1208; line-height: 1.1; white-space: normal; }
+  .b4-wrap .b4-label-rule { display: none; }
+  .b4-wrap :is(.mta-group-label, .news-subhead, .xs-box-label, .xs-col-label, .sl-kicker) {
+    font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-weight: 600; font-size: 21px; letter-spacing: 0; text-transform: none;
+    color: #9B3A1A; margin: 18px 0 14px; padding-bottom: 4px; border-bottom: 1px dotted #C4A46A; }
+  .b4-wrap :is(.mta-group-label, .news-subhead, .xs-box-label, .xs-col-label, .sl-kicker)::before { content: "\00A7\00A0"; }
+  .b4-wrap .news-source { font-size: 10px; font-weight: 700; letter-spacing: .06em; color: #6A5030; }   /* tight enough that most fit one line on a phone */
+  .b4-wrap .news-source::before { content: "\25A0\00A0"; color: #9B3A1A; font-size: 8px; vertical-align: 1px; }
+  /* Bird, Tree and Map of the Week sit inside the Nature Report under a section-mark label */
+  .b4-wrap .nature-sub { margin-top: 12px; }
+  .b4-wrap .nature-sub + .nature-sub { margin-top: 28px; }
+"""
+
+
+# The News & Culture masthead on the main page: the front door to the separate edition, drawn as that page's own
+# masthead turned inside out (dark band, brownstone line drawing, big serif title) so it is the one thing on the
+# page that cannot be scrolled past. Full width of the page, like the Ink Band design.
+NC_FEATURE_CSS = r"""
+  .b4-wrap .b4-section.nc-feature { padding: 0 0 26px; border-bottom: 0; margin-top: 34px; }
+  .b4-wrap .nc-masthead { display: block; margin: 0 -32px 26px; padding: 36px 40px 34px; background: #EDE0C0; color: #1A1208; text-align: center; text-decoration: none;
+    border-top: 5px solid #1A1208; border-bottom: 5px solid #1A1208;
+    box-shadow: inset 0 0 0 10px #EDE0C0, inset 0 0 0 12px #1A1208, inset 0 0 0 15px #EDE0C0, inset 0 0 0 16px #9B3A1A; }
+  .b4-wrap .nc-kicker { font-family: 'Courier Prime', monospace; font-size: 10px; letter-spacing: .3em; text-transform: uppercase; color: #9B3A1A; }
+  .b4-wrap .nc-vignette { max-width: 300px; margin: 20px auto 16px; color: #1A1208; opacity: .9; }
+  .b4-wrap .nc-vignette svg { display: block; width: 100%; height: auto; }
+  .b4-wrap .nc-title { font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 600; font-size: clamp(40px, 11.5vw, 60px); line-height: 1; letter-spacing: -.015em; color: #1A1208; }
+  .b4-wrap .nc-title::after { content: ""; display: block; width: 44px; height: 2px; background: #9B3A1A; margin: 16px auto 0; }
+  .b4-wrap .nc-cta { display: inline-block; margin-top: 24px; padding: 13px 26px; background: #1A1208; color: #F5EDD8; font-family: 'Courier Prime', monospace;
+    font-size: 10px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; }
+  .b4-wrap .nc-masthead:hover .nc-cta { background: #9B3A1A; }
+  @media (max-width: 400px) {
+    .b4-wrap .nc-masthead { padding: 32px 26px 30px; }
+    .b4-wrap .nc-kicker { letter-spacing: .18em; font-size: 9px; }
+    .b4-wrap .nc-cta { padding: 13px 18px; letter-spacing: .16em; }
+  }
+"""
+
+
 def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
                      mta_alerts, surface_alerts, pr_events, dice_picks=None,
-                     long_list_url="", edible_picks=None):
+                     long_list_url="", edible_picks=None,
+                     headlines=None, news_url="", inat_html="", nature=None,
+                     weekender_html="", around_extra_html=""):
     sat_label = saturday.strftime("%A, %B %d")
     sun_label = sunday.strftime("%B %d")
     sat_date_top = saturday.strftime("%B %d")
@@ -3139,19 +3533,22 @@ def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
     section_order = [
         "MTA THIS WEEKEND",
         "WEATHER + BISCUIT",
-        "UNION SQUARE GREENMARKET",
-        "SAMPLE HALL",
+        "SAMPLE GREENMARKET",
         "ON SALE THIS WEEKEND",
         "AROUND BROOKLYN",
+        "NEWS & CULTURE",
     ]
     section_labels_display = [
-        ("MTA This Weekend", "i."),
-        ("Weather + Biscuit", "ii."),
-        ("Union Square Greenmarket", "iii."),
-        ("Sample Hall", "iv."),
-        ("On Sale This Weekend", "v."),
-        ("Around Brooklyn", "vi."),
+        "MTA This Weekend",
+        "Weather + Biscuit",
+        "Sample Greenmarket",
+        "On Sale This Weekend",          # Public Records' shows are part of this list
+        "Around Brooklyn",
+        "News &amp; Culture",
     ]
+    # Roman numerals are handed out in the order sections actually appear, so a section that is left out
+    # (News & Culture with nothing to show) never leaves a gap.
+    romans = iter(["i.", "ii.", "iii.", "iv.", "v.", "vi.", "vii.", "viii.", "ix.", "x.", "xi.", "xii.", "xiii.", "xiv."])
 
     # Split narrative by section headers
     import re
@@ -3171,12 +3568,15 @@ def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
     # Build HTML sections
     html_sections = ""
     for i, key in enumerate(section_order):
-        label, roman = section_labels_display[i]
+        if key == "NEWS & CULTURE" and not (headlines and news_url):
+            continue                        # nothing to point at yet: no section, and no numeral used up
+        label = section_labels_display[i]
+        roman = next(romans)
         content = parsed.get(key, "")
 
         if key == "MTA THIS WEEKEND":
             # MTA is rendered from structured alert data, not Claude prose:
-            # a home-station status banner plus a single C/G change list.
+            # a home-station status banner plus a single A/C/3 change list.
             mta_html = build_mta_section_html(mta_alerts, surface_alerts)
             html_sections += f"""
         <div class="b4-section">
@@ -3256,47 +3656,8 @@ def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
             if edible_html:
                 items_html += f"""
           <div class="news-subhead">From Edible Brooklyn</div>{edible_html}"""
+            items_html += around_extra_html      # At the cinema (culture_listings); empty when unreadable
 
-            html_sections += f"""
-        <div class="b4-section">
-          <div class="b4-label-row">
-            <span class="b4-label">{label}</span>
-            <div class="b4-label-rule"></div>
-            <span class="b4-label-roman">{roman}</span>
-          </div>
-          <div class="news-feed">{items_html}</div>
-        </div>"""
-        elif key == "SAMPLE HALL":
-            # Rendered directly from scraped show data — no Claude prose, no
-            # commentary. Same card anatomy as Around Brooklyn: small-caps
-            # eyebrow (date · type), serif headline (artists, linked to
-            # tickets), dek (time @ room).
-            import html as _html
-            items_html = ""
-            for e in pr_events:
-                # e["text"] is "Sat Jul 5 — Club — 3:00 pm @ Sound Room — Artists"
-                parts = [p.strip() for p in e.get("text", "").split(" — ")]
-                date_str  = parts[0] if parts else ""
-                show_type = e.get("type", "") or (parts[1] if len(parts) > 1 else "")
-                time_room = parts[2] if len(parts) > 2 else ""
-                artists   = " — ".join(parts[3:]) if len(parts) > 3 else ""
-                source_label = " &middot; ".join(
-                    _html.escape(p) for p in (date_str, show_type) if p
-                )
-                hed_text = _html.escape(artists if artists else time_room)
-                url = e.get("url", "")
-                hed = f'<a href="{_html.escape(url)}">{hed_text}</a>' if url else hed_text
-                dek = _html.escape(time_room) if artists else ""
-                items_html += f"""
-          <div class="news-item">
-            <div class="news-source">{source_label}</div>
-            <div class="news-headline-row">
-              <div class="news-hed">{hed}</div>
-              {"<div class='news-dek'>" + dek + "</div>" if dek else ""}
-            </div>
-          </div>"""
-            if not items_html:
-                items_html = "<p>No Saturday shows at Sample Hall this week.</p>"
             html_sections += f"""
         <div class="b4-section">
           <div class="b4-label-row">
@@ -3314,9 +3675,11 @@ def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
             # companion page linked underneath.
             import html as _html
             items_html = ""
-            for e in (dice_picks or []):
+            # The DICE picks plus any Public Records show, in the order they start.
+            for e in on_sale_lineup(dice_picks, pr_events):
                 eyebrow_bits = [
-                    e["start"].strftime("%a %-d %b &middot; %-I:%M %p"),
+                    e["start"].strftime("%a %-d %b &middot; %-I:%M %p") if e.get("has_time", True)
+                    else e["start"].strftime("%a %-d %b"),
                     e.get("tracked_venue") or e.get("venue", ""),
                 ]
                 eyebrow = " &middot; ".join(b for b in eyebrow_bits if b)
@@ -3326,19 +3689,24 @@ def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
                 hed = f'<a href="{_html.escape(url)}">{hed_text}</a>' if url else hed_text
 
                 dek_bits = []
-                # Skip artists the headline already names, so the dek adds
-                # information instead of echoing the title.
-                name_lower = e["name"].lower()
-                artists = [
-                    a for a in e.get("artists", [])
-                    if a and a.lower() not in name_lower
-                ]
-                if artists:
-                    dek_bits.append(", ".join(artists[:3]))
-                if e.get("price"):
-                    dek_bits.append(e["price"])
-                if e.get("sold_out"):
-                    dek_bits.append("Sold out")
+                if e.get("public_records"):
+                    # Public Records' own description, word for word ("11:00 pm @ Sound Room ...")
+                    if e.get("dek"):
+                        dek_bits.append(e["dek"])
+                else:
+                    # Skip artists the headline already names, so the dek adds
+                    # information instead of echoing the title.
+                    name_lower = e["name"].lower()
+                    artists = [
+                        a for a in e.get("artists", [])
+                        if a and a.lower() not in name_lower
+                    ]
+                    if artists:
+                        dek_bits.append(", ".join(artists[:3]))
+                    if e.get("price"):
+                        dek_bits.append(e["price"])
+                    if e.get("sold_out"):
+                        dek_bits.append("Sold out")
                 dek = " &middot; ".join(_html.escape(b) for b in dek_bits)
 
                 items_html += f"""
@@ -3363,9 +3731,38 @@ def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
           </div>
           <div class="news-feed">{items_html}</div>
         </div>"""
+        elif key == "NEWS & CULTURE":
+            # The way into the separate News & Culture page: the five newest
+            # headlines across its sections (one per section), quoted from their
+            # sources, then the link. Left out when that page has nothing yet.
+            if not (headlines and news_url):
+                continue
+            import html as _html
+            items_html = ""
+            for h in headlines:
+                eyebrow = " &middot; ".join(b for b in (
+                    _html.escape(h["category"]), _html.escape(h["source"]),
+                    h["date"].strftime("%b %-d") if h.get("date") else "") if b)
+                dek = _html.escape(h.get("dek", ""))
+                items_html += f"""
+          <div class="news-item">
+            <div class="news-source">{eyebrow}</div>
+            <div class="news-headline-row">
+              <div class="news-hed"><a href="{_html.escape(h['url'])}">{_html.escape(h['title'])}</a></div>
+              {"<div class='news-dek'>" + dek + "</div>" if dek else ""}
+            </div>
+          </div>"""
+            items_html += f"""
+          <p style="margin-top:14px;"><a href="{_html.escape(news_url)}">News &amp; Culture &rarr;</a></p>"""
+            html_sections += news_feature_html(roman, news_url, items_html)
         else:
             paras = [p.strip() for p in content.split("\n\n") if p.strip()]
             paras_html = "".join(f"<p>{p}</p>" for p in paras) if paras else f"<p>{content}</p>"
+            if key == "WEATHER + BISCUIT":
+                paras_html += build_sun_tide_html(saturday, sunday)   # sun, golden hour and tides under the forecast
+                paras_html += dm.radar_html()      # live NWS radar loop under the forecast
+            elif key == "SAMPLE GREENMARKET":
+                paras_html += rcp.build_recipe_html(saturday, _SEASONAL_PRODUCE.get(saturday.month, []))  # a real recipe on what's in season
             html_sections += f"""
         <div class="b4-section">
           <div class="b4-label-row">
@@ -3376,8 +3773,19 @@ def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
           {paras_html}
         </div>"""
 
-    # Pigeon silhouette (reused via <use>)
-    nature_html = build_nature_sections_html(saturday)
+    # The Nature Report holds Bird, Tree and Map of the Week as sub-sections; Then & Now and Shore Leave
+    # follow as sections of their own, then the MTA Weekender closes the page.
+    nature_html = ""
+    nature_body = build_nature_report_html(inat_html, nature)
+    if nature_body:
+        nature_html += _nature_section("Nature Report", next(romans), nature_body)
+    for key in ("then_now", "shore"):
+        piece = (nature or {}).get(key)
+        if piece:
+            nature_html += _nature_section(piece[0], next(romans), piece[1])
+    # MTA Weekender closes the page: where subway trains are not running, then three car-free trips.
+    if weekender_html:
+        nature_html += _nature_section("MTA Weekender", next(romans), weekender_html)
 
     pigeon_defs = f"""<defs>
       <image id="pp" href="{PIGEON_GREY_URL}" width="60" height="52"/>
@@ -3425,7 +3833,7 @@ def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Special+Elite&display=swap" rel="stylesheet">
 <style>
   body {{ margin: 0; padding: 16px; background: #EDE0C0; }}
   .b4-wrap {{
@@ -3522,6 +3930,7 @@ def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
   .news-headline-row:last-child {{ margin-bottom: 0; }}
   .news-hed {{ font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 600; font-size: 15px; line-height: 1.3; color: #1A1208; margin-bottom: 5px; overflow-wrap: break-word; word-break: break-word; }}
   .news-hed a {{ color: #1A1208; text-decoration: none; border-bottom: 1px solid #D4B98A; }}
+  .news-hed a:hover {{ color: #9B3A1A; border-bottom-color: #9B3A1A; }}
   .news-dek {{ font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-size: 13.5px; color: #6A5030; line-height: 1.55; }}
   .b4-footer {{
     background: #1A1208;
@@ -3538,7 +3947,7 @@ def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
   .b4-footer-eyebrow {{ font-family: 'Courier Prime', monospace; font-size: 7.5px; letter-spacing: 0.16em; text-transform: uppercase; color: #9B8A5A; }}
   .b4-signature {{ font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-size: 20px; color: #D4B98A; line-height: 1; margin-top: 2px; }}
   .b4-tagline {{ font-family: 'Courier Prime', monospace; font-size: 7px; letter-spacing: 0.04em; text-transform: uppercase; color: #9B8A5A; margin-top: 2px; white-space: nowrap; }}
-{NATURE_CSS}</style>
+{NATURE_CSS}{dp.INAT_CSS}{mw.MTA_CSS}{dm.MOTION_CSS}{DESIGN_CSS}{NC_FEATURE_CSS}</style>
 </head>
 <body>
 <div class="b4-wrap">
@@ -3561,6 +3970,7 @@ def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
     </div>
     <div class="b4-rule"></div>
     <div class="b4-header-bottom-rule"></div>
+    {dm.pigeon_walk_html(PIGEON_GREY_URL)}
   </div>
 
   <div class="b4-body">
@@ -3574,13 +3984,158 @@ def build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
       <span class="b4-signature">Alex Sample</span>
       <span class="b4-tagline">A personal dispatch &mdash; written by machines, curated by instinct.</span>
     </div>
-    <img class="b4-crest" src="{CREST_URL}" width="88" height="88" alt="Dispatch crest">
+    <img class="b4-crest" src="{ZT_CREST_URL}" width="88" height="88" alt="sample crest">
   </div>
 
 </div>
 </body>
 </html>"""
     return html
+
+
+# The Long List's stylesheet: a risograph show-flyer zine. Newsprint ground, an electric-yellow masthead with
+# a hot-pink offset shadow, cobalt date banners, 2px ink borders, and a three-column grid of flyer cards.
+# The cards for shows that made the email (.is-pick) get a blush fill, a pink shadow and a badge.
+# Light is the default; a dark variant swaps the tokens under prefers-color-scheme. No JavaScript.
+# A raw string, so nothing in the CSS is read as a Python escape (and no doubled braces).
+LONG_LIST_CSS = r"""
+  :root {
+    --paper:#F7F3E8; --card:#FFFDF6; --pick:#FFF0F5;
+    --ink:#16141A; --muted:#575160; --stroke:#16141A; --rule:rgba(22,20,26,.3); --dot:rgba(22,20,26,.07);
+    --yellow:#FFE600; --pink:#FF2A6D; --cobalt:#0057FF; --time:#0057FF; --cobalt-deep:#0040C8;
+    --on-yellow:#16141A; --on-pink:#16141A; --on-cobalt:#FFFFFF;
+    --btn-bg:#16141A; --btn-fg:#FFE600; --focus:#0057FF;
+    --serif:'Cormorant Garamond',Georgia,'Times New Roman',serif;
+    --mono:'Courier Prime','Courier New',ui-monospace,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:#121016; --card:#1D1A24; --pick:#2B1527;
+      --ink:#F7F3E8; --muted:#BDB6C8; --stroke:#F7F3E8; --rule:rgba(247,243,232,.32); --dot:rgba(247,243,232,.06);
+      --cobalt:#2563EB; --time:#8CB0FF;
+      --btn-bg:#FFE600; --btn-fg:#16141A; --focus:#FFE600;
+    }
+  }
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--paper); color:var(--ink);
+         background-image:radial-gradient(var(--dot) 1.1px, transparent 1.3px); background-size:14px 14px;
+         font-family:var(--serif); font-size:18px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:960px; margin:0 auto; padding:24px 16px 72px; }
+  a { color:inherit; }
+  a:focus-visible { outline:3px solid var(--focus); outline-offset:3px; }
+
+  /* masthead: the flyer */
+  .masthead { position:relative; overflow:hidden; background:var(--yellow); color:var(--on-yellow);
+              border:2px solid var(--on-yellow); box-shadow:8px 8px 0 var(--pink); padding:20px 20px 30px; }
+  .masthead::after { content:""; position:absolute; right:-36px; top:-36px; width:230px; height:230px; border-radius:50%;
+                     background-image:radial-gradient(var(--on-yellow) 1.7px, transparent 2px); background-size:12px 12px;
+                     opacity:.2; pointer-events:none; }
+  .masthead > * { position:relative; z-index:1; }
+  .kicker { margin:0 0 6px; font-family:var(--mono); font-weight:700; font-size:12px; letter-spacing:.2em; text-transform:uppercase; }
+  .kicker a { display:inline-flex; align-items:center; min-height:44px; text-decoration:underline;
+              text-decoration-thickness:2px; text-underline-offset:4px; }
+  .kicker a:hover { background:var(--on-yellow); color:var(--yellow); text-decoration:none; padding:0 6px; margin:0 -6px; }
+  .masthead a:focus-visible { outline-color:var(--on-yellow); }
+  .masthead h1 { margin:0; font-weight:700; font-size:clamp(42px,11vw,80px); line-height:.96; letter-spacing:-.01em; text-wrap:balance; }
+  .masthead h1 em { display:block; margin-top:6px; font-style:italic; font-weight:600; color:var(--cobalt-deep);
+                    font-size:.62em; line-height:1.05; letter-spacing:0; }
+  .standfirst { margin:16px 0 0; max-width:58ch; font-style:italic; font-weight:500; font-size:clamp(18px,3.6vw,22px); line-height:1.4; }
+
+  /* section labels */
+  .seclabel { display:flex; align-items:center; gap:12px; margin:54px 0 22px; font-size:inherit; font-weight:400; }
+  .seclabel .sec-name { font-family:var(--mono); font-weight:700; font-size:13px; letter-spacing:.2em; text-transform:uppercase;
+                        padding:7px 12px; background:var(--btn-bg); color:var(--btn-fg); }
+  .seclabel .bar { flex:1; min-width:12px; height:0; border-top:2px solid var(--stroke); }
+  .seclabel .rom { font-style:italic; font-weight:600; font-size:20px; color:var(--muted); }
+
+  /* date banners */
+  .date-group + .date-group { margin-top:38px; }
+  .date-banner { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 14px;
+                 margin:0 0 24px; padding:10px 16px; background:var(--cobalt); color:var(--on-cobalt);
+                 border:2px solid var(--stroke); font-weight:400; }
+  .is-headline .date-banner { box-shadow:6px 6px 0 var(--yellow); }
+  .date-name { font-style:italic; font-weight:700; font-size:clamp(23px,5.4vw,30px); line-height:1.1; }
+  .daytag { font-family:var(--mono); font-weight:700; font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+            padding:5px 9px; background:var(--yellow); color:var(--on-yellow); border:2px solid var(--on-yellow); }
+
+  /* the flyer grid */
+  .event-grid { list-style:none; margin:0; padding:0; display:grid; gap:24px 18px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .event-card { position:relative; display:flex; flex-direction:column; gap:6px; min-width:0; padding:18px 16px 16px;
+                background:var(--card); border:2px solid var(--stroke); }
+  .event-card.is-pick { background:var(--pick); box-shadow:6px 6px 0 var(--pink); }
+  .pick-badge { position:absolute; top:-14px; right:10px; transform:rotate(2deg); padding:6px 8px; line-height:1;
+                font-family:var(--mono); font-weight:700; font-size:11px; letter-spacing:.12em; text-transform:uppercase;
+                background:var(--pink); color:var(--on-pink); border:2px solid var(--stroke); }
+  .event-time { margin:0; font-family:var(--mono); font-weight:700; font-size:14px; letter-spacing:.04em; color:var(--time); }
+  .event-title { margin:0; font-weight:700; font-size:24px; line-height:1.1; color:var(--ink); overflow-wrap:anywhere; }
+  .event-title a { display:flex; align-items:center; min-height:44px; padding:4px 0; color:inherit;
+                   text-decoration:underline; text-decoration-thickness:2px; text-underline-offset:4px;
+                   text-decoration-color:var(--pink); }
+  .event-title a:hover { background:var(--yellow); color:var(--on-yellow); text-decoration-color:var(--on-yellow); }
+  .event-title .event-name { display:block; padding:4px 0; }
+  .event-venue { margin:0; font-family:var(--mono); font-size:13px; letter-spacing:.02em; color:var(--muted); }
+  .event-price { align-self:flex-start; display:inline-block; padding:2px 8px; font-family:var(--mono); font-weight:700; font-size:13px;
+                 background:var(--yellow); color:var(--on-yellow); border:2px solid var(--on-yellow); }
+  .event-actions { margin-top:auto; padding-top:10px; }
+  .dice-btn { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 16px;
+              font-family:var(--mono); font-weight:700; font-size:12.5px; letter-spacing:.08em; text-transform:uppercase;
+              text-decoration:none; background:var(--btn-bg); color:var(--btn-fg); border:2px solid var(--btn-bg); }
+  .dice-btn span { margin-left:.55em; }
+  .dice-btn:hover { background:var(--pink); color:var(--on-pink); border-color:var(--stroke); }
+  .event-soldout { display:inline-flex; align-items:center; min-height:44px; padding:0 12px;
+                   font-family:var(--mono); font-weight:700; font-size:12.5px; letter-spacing:.08em; text-transform:uppercase;
+                   color:var(--muted); border:2px dashed var(--stroke); }
+  .rempty { grid-column:1/-1; list-style:none; padding:14px 16px; font-style:italic; font-size:18px; color:var(--muted);
+            border:2px dashed var(--stroke); }
+
+  /* the rooms */
+  .roomgrid { display:grid; align-items:start; gap:24px 20px; grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); }
+  .room { min-width:0; padding:16px 18px 14px; background:var(--card); border:2px solid var(--stroke); }
+  .room--live { box-shadow:6px 6px 0 var(--cobalt); }
+  .room--quiet, .room--unlisted { background:transparent; border-style:dashed; }
+  .roomhead { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 10px; }
+  .roomhead h3 { margin:0; font-weight:700; font-size:27px; line-height:1.05; color:var(--ink); }
+  .pill { padding:4px 8px; font-family:var(--mono); font-weight:700; font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+          white-space:nowrap; border:2px solid var(--stroke); }
+  .pill--live { background:var(--cobalt); color:var(--on-cobalt); }
+  .pill--quiet { background:var(--yellow); color:var(--on-yellow); border-color:var(--on-yellow); }
+  .pill--unlisted { border-style:dashed; color:var(--muted); }
+  .roomwhere { margin:6px 0 10px; font-family:var(--mono); font-size:12.5px; letter-spacing:.04em; color:var(--muted); }
+  .room-rows { list-style:none; margin:0; padding:0; }
+  .room-row { display:grid; grid-template-columns:84px minmax(0,1fr); gap:0 12px; align-items:start; padding:6px 0 6px 12px;
+              border-top:2px dashed var(--rule); }
+  .room-row:first-child { border-top:0; }
+  .room-row.is-pick { background:var(--pick); box-shadow:inset 5px 0 0 var(--pink); }
+  .room-when { padding-top:14px; font-family:var(--mono); font-weight:700; font-size:12.5px; line-height:1.3; color:var(--time); }
+  .room-when small { display:block; font-size:12px; font-weight:400; color:var(--muted); }
+  .room-main { min-width:0; }
+  .room-row .event-title { display:block; font-size:21px; }
+  .room-meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; padding-bottom:6px;
+               font-family:var(--mono); font-size:12.5px; color:var(--muted); }
+  .room-meta:empty { display:none; }
+  .room-meta .pick-badge { position:static; transform:none; }
+  .room-meta .event-soldout { min-height:0; padding:2px 8px; font-size:11px; }
+  .room .rempty { margin:0 0 4px; }
+
+  .foot { margin-top:60px; padding-top:16px; border-top:2px solid var(--stroke); display:flex; flex-wrap:wrap; gap:8px 14px;
+          justify-content:space-between; font-family:var(--mono); font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+          color:var(--muted); }
+
+  @media (max-width:840px) {
+    .event-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  }
+  @media (max-width:560px) {
+    .wrap { padding:18px 16px 56px; }
+    .masthead { padding:14px 16px 24px; box-shadow:6px 6px 0 var(--pink); }
+    .masthead::after { right:-30px; top:-30px; width:140px; height:140px; opacity:.16; }
+    .kicker { font-size:11.5px; letter-spacing:.1em; }
+    .event-grid { grid-template-columns:1fr; gap:26px; }
+    .dice-btn { width:100%; }
+    .seclabel { margin-top:44px; }
+    .room-row { grid-template-columns:76px minmax(0,1fr); gap:0 10px; }
+  }
+"""
 
 
 def build_long_list_html(watchlist, sweep_events, saturday, friday, picked_urls=()):
@@ -3592,10 +4147,10 @@ def build_long_list_html(watchlist, sweep_events, saturday, friday, picked_urls=
     weekday filler, no stale tail.
 
     Two passes over the same data, because they answer different questions.
-    The ledger comes first — every tracked show in date order, with the five
-    that made the email marked so it's clear what was left out. Then the rooms,
-    one card per venue, for when the question is "what's on at Sample Venue A" rather
-    than "what's on Friday".
+    The ledger comes first — every tracked show in date order, one flyer card
+    each, with the five that made the email picked out in pink so it's clear
+    what was left out. Then the rooms, one card per venue, for when the
+    question is "what's on at Xanadu" rather than "what's on Friday".
     """
     import html as _html
 
@@ -3605,24 +4160,80 @@ def build_long_list_html(watchlist, sweep_events, saturday, friday, picked_urls=
     def esc(s):
         return _html.escape(str(s or ""))
 
-    def event_row(e, cls="lrow", stamp="time"):
-        """
-        `stamp` picks the left column. The ledger is already grouped under a
-        date heading, so a time is enough there; a room's card spans weeks, so
-        it has to carry the date or every row reads as the same night.
-        """
-        picked = ' is-picked' if e.get("url") and e["url"] in picked_urls else ''
-        name = f'<a href="{esc(e["url"])}">{esc(e["name"])}</a>' if e.get("url") else esc(e["name"])
-        bits = [b for b in (e.get("price"), "Sold out" if e.get("sold_out") else "") if b]
-        meta = f'<span class="lmeta">{esc(" · ".join(bits))}</span>' if bits else ""
-        when = (e['start'].strftime('%-I:%M %p').lower() if stamp == "time"
-                else e['start'].strftime('%a %-d %b'))
+    def is_pick(e):
+        return bool(e.get("url") and e["url"] in picked_urls)
+
+    def title_link(e):
+        # the title as the show's own words, linked when DICE gave us an address
+        name = esc(e["name"])
+        if e.get("url"):
+            return f'<a href="{esc(e["url"])}">{name}</a>'
+        return f'<span class="event-name">{name}</span>'
+
+    def event_card(e):
+        """One flyer. Time, title, room, price, and a way to buy."""
+        pick = is_pick(e)
+        name = esc(e["name"])
+        badge = '<span class="pick-badge">In The Email</span>' if pick else ""
+        when = e["start"].strftime("%-I:%M %p").lower()
+        room = esc(e.get("tracked_venue") or e.get("venue"))
+        venue = f'<p class="event-venue">{room}</p>' if room else ""
+        price = f'<span class="event-price">{esc(e["price"])}</span>' if e.get("price") else ""
+        if e.get("sold_out"):
+            action = '<span class="event-soldout">Sold out</span>'
+        elif e.get("url"):
+            # the button's name carries the show, so a screen reader can tell eleven of them apart
+            action = (f'<a class="dice-btn" href="{esc(e["url"])}" aria-label="Tickets on DICE: {name}">'
+                      'Tickets on DICE<span aria-hidden="true">&rarr;</span></a>')
+        else:
+            action = ""
+        actions = f'<div class="event-actions">{action}</div>' if action else ""
+        pick_class = " is-pick" if pick else ""
         return f"""
-          <li class="{cls}{picked}">
-            <span class="ltime">{when}</span>
-            <span class="lname">{name}{meta}</span>
-            <span class="lvenue">{esc(e.get('tracked_venue') or e.get('venue'))}</span>
+          <li class="event-card{pick_class}">
+            {badge}
+            <p class="event-time">{when}</p>
+            <h4 class="event-title">{title_link(e)}</h4>
+            {venue}
+            {price}
+            {actions}
           </li>"""
+
+    def room_row(e):
+        """A compact line inside a room's own card: date and time, title, then the small print."""
+        pick = is_pick(e)
+        bits = []
+        if pick:
+            bits.append('<span class="pick-badge">In The Email</span>')
+        if e.get("price"):
+            bits.append(f'<span class="event-price">{esc(e["price"])}</span>')
+        if e.get("sold_out"):
+            bits.append('<span class="event-soldout">Sold out</span>')
+        joined = "".join(bits)
+        meta = f'<span class="room-meta">{joined}</span>'
+        day = e["start"].strftime("%a %-d %b")
+        clock = e["start"].strftime("%-I:%M %p").lower()
+        pick_class = " is-pick" if pick else ""
+        return f"""
+          <li class="room-row{pick_class}">
+            <span class="room-when">{day}<small>{clock}</small></span>
+            <span class="room-main"><span class="event-title">{title_link(e)}</span>{meta}</span>
+          </li>"""
+
+    def night_groups(days, rows_for, tag_for=None):
+        out = ""
+        for d in days:
+            tag = tag_for(d) if tag_for else ""
+            headline = ' is-headline' if tag else ""
+            cards = "".join(event_card(r) for r in rows_for(d))
+            if not cards:
+                cards = '<li class="rempty">Nothing booked at the tracked rooms.</li>'
+            out += f"""
+      <section class="date-group{headline}">
+        <h3 class="date-banner"><span class="date-name">{d.strftime('%A, %B %-d')}</span>{tag}</h3>
+        <ul class="event-grid">{cards}</ul>
+      </section>"""
+        return out
 
     # ── rooms ────────────────────────────────────────────────────────────
     rooms_html = ""
@@ -3640,9 +4251,7 @@ def build_long_list_html(watchlist, sweep_events, saturday, friday, picked_urls=
         addr_parts = [p.strip() for p in (entry.get("address") or "").split(",")]
         if len(addr_parts) > 2:
             where = ", ".join(addr_parts[1:3])
-        rows = ""
-        for e in in_window:
-            rows += event_row(e, "rrow", stamp="date")
+        rows = "".join(room_row(e) for e in in_window)
         if not rows:
             rows = f'<li class="rempty">{esc(entry.get("note") or "Nothing on a Friday or Saturday in the next fortnight.")}</li>'
         rooms_html += f"""
@@ -3651,7 +4260,7 @@ def build_long_list_html(watchlist, sweep_events, saturday, friday, picked_urls=
           <h3>{esc(label)}</h3><span class="pill pill--{state}">{esc(pill)}</span>
         </header>
         <p class="roomwhere">{esc(where)}</p>
-        <ul class="rows">{rows}</ul>
+        <ul class="room-rows">{rows}</ul>
       </article>"""
 
     for label, entry in watchlist["artists"].items():
@@ -3661,11 +4270,11 @@ def build_long_list_html(watchlist, sweep_events, saturday, friday, picked_urls=
             parts = [p.strip() for p in (e.get("address") or "").split(",")]
             if len(parts) > 2:
                 city = parts[-3]
+            city_html = f'<span class="room-meta">{esc(city)}</span>' if city else ""
             rows += f"""
-          <li class="rrow">
-            <span class="ltime">{e['start'].strftime('%-d %b')}</span>
-            <span class="lname"><a href="{esc(e['url'])}">{esc(e['venue'])}</a></span>
-            <span class="lvenue">{esc(city)}</span>
+          <li class="room-row">
+            <span class="room-when">{e['start'].strftime('%-d %b')}</span>
+            <span class="room-main"><span class="event-title"><a href="{esc(e['url'])}">{esc(e['venue'])}</a></span>{city_html}</span>
           </li>"""
         if not rows:
             rows = f'<li class="rempty">{esc(entry.get("note") or "No dates announced.")}</li>'
@@ -3676,7 +4285,7 @@ def build_long_list_html(watchlist, sweep_events, saturday, friday, picked_urls=
           <span class="pill pill--{entry['state']}">artist watch</span>
         </header>
         <p class="roomwhere">Following</p>
-        <ul class="rows">{rows}</ul>
+        <ul class="room-rows">{rows}</ul>
       </article>"""
 
     # ── ledger ───────────────────────────────────────────────────────────
@@ -3692,33 +4301,18 @@ def build_long_list_html(watchlist, sweep_events, saturday, friday, picked_urls=
             by_date.setdefault(r["date"], []).append(r)
 
     # Walk the window rather than the data, so a night with nothing on it still
-    # gets a heading. A missing Friday should read as "nothing booked", not as
+    # gets a banner. A missing Friday should read as "nothing booked", not as
     # a night that quietly didn't exist.
-    ledger_html = ""
-    for d in window:
-        headline = d in (saturday, friday)
-        tag = '<span class="daytag">in the email</span>' if headline else ""
-        rows = "".join(event_row(r) for r in by_date.get(d, []))
-        if not rows:
-            rows = '<li class="rempty">Nothing booked at the tracked rooms.</li>'
-        ledger_html += f"""
-      <section class="daygroup{' is-headline' if headline else ''}">
-        <h3 class="dayhead"><span>{d.strftime('%A, %B %-d')}</span>{tag}</h3>
-        <ul class="rows">{rows}</ul>
-      </section>"""
+    ledger_html = night_groups(
+        window,
+        lambda d: by_date.get(d, []),
+        lambda d: '<span class="daytag">In the email</span>' if d in (saturday, friday) else "")
 
     # ── the wider sweep ──────────────────────────────────────────────────
-    sweep_html = ""
     sweep_by_date = {}
     for e in (sweep_events or []):
         sweep_by_date.setdefault(e["date"], []).append(e)
-    for d in sorted(sweep_by_date):
-        rows = "".join(event_row(e) for e in sweep_by_date[d])
-        sweep_html += f"""
-      <section class="daygroup">
-        <h3 class="dayhead"><span>{d.strftime('%A, %B %-d')}</span></h3>
-        <ul class="rows">{rows}</ul>
-      </section>"""
+    sweep_html = night_groups(sorted(sweep_by_date), lambda d: sweep_by_date[d])
     if not sweep_html:
         sweep_html = ('<p class="rempty">Nothing else within five miles on these '
                       'nights. DICE\'s browse pages only see a few days ahead, so '
@@ -3731,120 +4325,33 @@ def build_long_list_html(watchlist, sweep_events, saturday, friday, picked_urls=
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
 <meta name="robots" content="noindex, nofollow">
 <title>The Long List &middot; Weekend Dispatch</title>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-<style>
-  :root {{
-    --ground:#EDE0C0; --card:#F5EDD8; --panel:#EFE3C3;
-    --ink:#1A1208; --body:#2A1E0A; --muted:#6A5030; --faint:#B89A5A;
-    --accent:#9B3A1A; --rule:#D4B98A; --rule-soft:#C4A46A;
-    --serif:'Cormorant Garamond',Georgia,'Times New Roman',serif;
-    --mono:'Courier Prime','Courier New',ui-monospace,monospace;
-  }}
-  @media (prefers-color-scheme: dark) {{
-    :root {{
-      --ground:#141009; --card:#1E1710; --panel:#262017;
-      --ink:#F3E9D2; --body:#E4D7BC; --muted:#B49F76; --faint:#8A7550;
-      --accent:#E07A4E; --rule:#3A2F20; --rule-soft:#4A3D2A;
-    }}
-  }}
-  * {{ box-sizing:border-box; }}
-  body {{ margin:0; background:var(--ground); color:var(--body);
-          font-family:var(--serif); font-size:17px; line-height:1.6;
-          -webkit-font-smoothing:antialiased; }}
-  .wrap {{ max-width:900px; margin:0 auto; padding:26px 18px 64px; }}
-  a {{ color:var(--accent); }}
-  .masthead {{ background:var(--card); border:1px solid var(--rule); padding:24px; }}
-  .kicker {{ font-family:var(--mono); font-size:9px; letter-spacing:.3em;
-             text-transform:uppercase; color:var(--muted); margin:0 0 10px; }}
-  .masthead h1 {{ font-size:clamp(28px,5.5vw,42px); line-height:1.06; margin:0;
-                  color:var(--ink); font-weight:600; text-wrap:balance; }}
-  .masthead h1 em {{ color:var(--accent); font-style:normal; }}
-  .standfirst {{ margin:12px 0 0; color:var(--muted); font-style:italic; max-width:60ch; }}
-  .rule-sm {{ width:32px; height:2px; background:var(--accent); margin:14px 0 0; }}
-  .seclabel {{ display:flex; align-items:center; gap:12px; margin:46px 0 14px; }}
-  .seclabel span:first-child {{ font-family:var(--mono); font-size:9px;
-      letter-spacing:.26em; text-transform:uppercase; color:var(--accent); white-space:nowrap; }}
-  .seclabel .bar {{ flex:1; height:1px; background:var(--rule); }}
-  .seclabel .rom {{ font-style:italic; font-size:13px; color:var(--faint); }}
-  .panel {{ background:var(--card); border:1px solid var(--rule); padding:20px; }}
-  .roomgrid {{ display:grid; gap:14px;
-               grid-template-columns:repeat(auto-fit,minmax(252px,1fr)); }}
-  .room {{ background:var(--card); border:1px solid var(--rule); padding:15px 17px 17px; }}
-  .room--quiet, .room--unlisted {{ background:var(--panel); }}
-  .roomhead {{ display:flex; align-items:center; justify-content:space-between; gap:9px; }}
-  .roomhead h3 {{ margin:0; font-size:19px; color:var(--ink); font-weight:600; }}
-  .pill {{ font-family:var(--mono); font-size:7.5px; letter-spacing:.14em;
-           text-transform:uppercase; padding:3px 7px; white-space:nowrap; }}
-  .pill--live {{ background:var(--accent); color:var(--card); }}
-  .pill--quiet {{ background:var(--rule); color:var(--muted); }}
-  .pill--unlisted {{ border:1px solid var(--rule-soft); color:var(--muted); }}
-  .roomwhere {{ font-family:var(--mono); font-size:8.5px; letter-spacing:.16em;
-                text-transform:uppercase; color:var(--faint); margin:4px 0 11px; }}
-  .rows {{ list-style:none; margin:0; padding:0; display:flex;
-           flex-direction:column; gap:8px; }}
-  .lrow, .rrow {{ display:grid; grid-template-columns:76px 1fr auto; gap:12px;
-                  align-items:baseline; padding-left:11px;
-                  border-left:2px solid var(--rule); }}
-  .rrow {{ grid-template-columns:62px 1fr auto; }}
-  /* Inside a room's own card the venue name is the heading, so repeating it on
-     every row is just noise. Artist cards keep it — there it's the city. */
-  .room:not(.room--artist) .rrow .lvenue {{ display:none; }}
-  .room:not(.room--artist) .rrow {{ grid-template-columns:76px 1fr; }}
-  .rrow .ltime {{ white-space:nowrap; }}
-  .lrow.is-picked {{ border-left-color:var(--accent); }}
-  .ltime {{ font-family:var(--mono); font-size:9.5px; letter-spacing:.06em;
-            color:var(--faint); font-variant-numeric:tabular-nums; }}
-  .lname a {{ color:var(--ink); text-decoration:none;
-              border-bottom:1px solid var(--rule); font-weight:600; }}
-  .lname a:hover {{ color:var(--accent); border-bottom-color:var(--accent); }}
-  .lmeta {{ display:block; font-style:italic; font-size:13.5px; color:var(--muted); }}
-  .lvenue {{ font-family:var(--mono); font-size:8.5px; letter-spacing:.14em;
-             text-transform:uppercase; color:var(--muted); white-space:nowrap; }}
-  .rempty {{ font-style:italic; color:var(--muted); font-size:14.5px; }}
-  .daygroup + .daygroup {{ margin-top:20px; padding-top:18px;
-                           border-top:1px solid var(--rule); }}
-  .dayhead {{ display:flex; align-items:baseline; gap:10px; margin:0 0 11px;
-              font-family:var(--mono); font-size:9.5px; letter-spacing:.18em;
-              text-transform:uppercase; color:var(--muted); font-weight:400; }}
-  .is-headline .dayhead {{ color:var(--accent); }}
-  .daytag {{ font-family:var(--mono); font-size:7.5px; letter-spacing:.14em;
-             text-transform:uppercase; color:var(--card); background:var(--accent);
-             padding:3px 6px; }}
-  .foot {{ margin-top:48px; padding-top:16px; border-top:1px solid var(--rule);
-           font-family:var(--mono); font-size:8.5px; letter-spacing:.16em;
-           text-transform:uppercase; color:var(--faint);
-           display:flex; flex-wrap:wrap; gap:10px; justify-content:space-between; }}
-  a:focus-visible {{ outline:2px solid var(--accent); outline-offset:2px; }}
-  @media (max-width:560px) {{
-    .lrow, .rrow {{ grid-template-columns:66px 1fr; }}
-    .lvenue {{ grid-column:2; }}
-  }}
-</style>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600;1,700&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
+<style>{LONG_LIST_CSS}</style>
 </head>
 <body>
 <div class="wrap">
   <header class="masthead">
-    <p class="kicker">Weekend Dispatch &middot; Companion Page</p>
-    <h1>The Long List<br><em>every room, every night</em></h1>
+    <p class="kicker"><a href="weekend.html">Weekend Dispatch</a> &middot; Companion Page</p>
+    <h1>The Long List<em>every room, every night</em></h1>
     <p class="standfirst">The five picks in the email came from here. This is the
       rest of it &mdash; every Friday and Saturday at the tracked rooms between
       now and {esc(window[-1].strftime('%-d %B'))}, plus whatever else DICE has
       within five miles of Fort Greene.</p>
-    <div class="rule-sm"></div>
   </header>
 
-  <div class="seclabel"><span>The Ledger</span><div class="bar"></div><span class="rom">i.</span></div>
-  <div class="panel">{ledger_html}
+  <h2 class="seclabel"><span class="sec-name">The Ledger</span><span class="bar"></span><span class="rom">i.</span></h2>
+  <div class="ledger">{ledger_html}
   </div>
 
-  <div class="seclabel"><span>The Rooms</span><div class="bar"></div><span class="rom">ii.</span></div>
+  <h2 class="seclabel"><span class="sec-name">The Rooms</span><span class="bar"></span><span class="rom">ii.</span></h2>
   <div class="roomgrid">{rooms_html}
   </div>
 
-  <div class="seclabel"><span>Elsewhere in Brooklyn</span><div class="bar"></div><span class="rom">iii.</span></div>
-  <div class="panel">{sweep_html}
+  <h2 class="seclabel"><span class="sec-name">Elsewhere in Brooklyn</span><span class="bar"></span><span class="rom">iii.</span></h2>
+  <div class="ledger">{sweep_html}
   </div>
 
   <div class="foot">
@@ -3856,40 +4363,140 @@ def build_long_list_html(watchlist, sweep_events, saturday, friday, picked_urls=
 </html>"""
 
 
-def save_long_list_html(html):
-    """Write the companion page next to the newsletter and return its URL."""
-    import pathlib
-    path = pathlib.Path.cwd() / "events.html"
-    path.write_text(html, encoding="utf-8")
-    print(f"  Long list saved: {path}")
-    pages_url = os.environ.get("GITHUB_PAGES_URL")
-    if pages_url:
-        return pages_url.rsplit("/", 1)[0] + f"/events.html?v={PAGES_VERSION}"
-    return f"file://{path}"
 
-
-def save_newsletter_html(html, saturday):
+def build_chco_html(issue):
     """
-    Save newsletter as weekend.html in the current directory (git repo),
-    commit and push to GitHub, then return the GitHub Pages URL.
-    Falls back to local file:// URL if GITHUB_PAGES_URL not set.
+    The Fort Greene Community News companion page: the issue's own table of
+    contents as a two-column broadsheet, each story linking to its page of the
+    PDF. Headlines, bylines and page numbers are quoted from the printed
+    contents list; the one-line summaries (when present) are machine-written
+    and labelled as such. Volume/number, page count, byline and summary are each
+    left out cleanly when the data doesn't have them.
+    """
+    import html as _html
+
+    def esc(s):
+        return _html.escape(str(s or ""))
+
+    arts = issue["articles"]
+    pdf = issue["pdf_url"]
+    month_name = issue["month"].split()[0]
+    vol, num = issue.get("volume"), issue.get("number")
+    posted = issue["posted"].strftime("%-d %B")
+    has_blurbs = any(a.get("blurb") for a in arts)
+
+    stories = ""
+    for a in arts:
+        byline = f'<span class="b-byline">By {esc(a["author"])}</span>' if a.get("author") else ""
+        blurb = f'<p class="b-blurb">{esc(a["blurb"])}</p>' if a.get("blurb") else ""
+        stories += f"""
+      <li class="b-story">
+        <div class="b-story-meta">
+          <span class="b-page">Page {a['page']}</span>
+          {byline}
+        </div>
+        <h2 class="b-title"><a href="{esc(pdf)}#page={a['page']}">{esc(a['title'])}</a></h2>
+        {blurb}
+      </li>"""
+
+    dateline = ""
+    if vol and num:
+        dateline += f"<span>Vol. {esc(vol)} &middot; No. {esc(num)}</span>\n        "
+    dateline += f"<span>Posted {esc(posted)}</span>"
+
+    disclosure = ("""
+    <p class="disclosure">
+      The one-line summaries are machine-written from the stories and can miss detail &mdash; the PDF is the source.
+    </p>""" if has_blurbs else "")
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Fort Greene Community News &middot; Weekend Dispatch</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>{dp.NEWSPRINT_CSS}</style>
+</head>
+<body>
+<input type="checkbox" id="theme-switch" class="visually-hidden" aria-label="Toggle dark mode">
+<div class="wrap">
+  <main class="sheet">
+    <div class="top-bar">
+      <p class="kicker"><a href="news-culture.html#crown-heights">News &amp; Culture</a> &middot; Fort Greene Community News</p>
+      <label for="theme-switch" class="theme-toggle">
+        <span class="label-night">Night Edition</span>
+        <span class="label-day">Day Edition</span>
+      </label>
+    </div>
+
+    <header class="masthead">
+      <div class="vignette" aria-hidden="true">
+        {dp.VIGNETTE_SVG}
+      </div>
+
+      <h1>
+        Fort Greene Community News
+        <span class="issue-tag">the {esc(month_name)} issue</span>
+      </h1>
+
+      <div class="dateline">
+        {dateline}
+      </div>
+      <div class="dateline-sub" aria-hidden="true"></div>
+
+      <div class="edition-bar edition-bar--solo">
+        <div class="links">
+          <a class="cta cta--solid" href="{esc(pdf)}">Read the full issue (PDF)</a>
+          <a class="cta" href="{esc(issue['post_url'])}">The issue on chcobrooklyn.com</a>
+        </div>
+      </div>
+    </header>
+
+    <div class="section-banner">
+      <span>Table of Contents &middot; Printed Order</span>
+      <span class="rom">i.</span>
+    </div>
+
+    <ol class="broadsheet-cols">{stories}
+    </ol>{disclosure}
+  </main>
+
+  <footer class="foot">
+    <span>Fort Greene &middot; Brooklyn</span>
+    <span>Source: <a href="{esc(issue['post_url'])}">Fort Greene Community Organization</a></span>
+  </footer>
+</div>
+</body>
+</html>"""
+
+
+
+
+
+
+
+
+def save_site(pages, saturday, extra_files=()):
+    """
+    Write every page into the current directory (the git repo), commit and push
+    them together with the Fort Greene Community News cache (and any extra
+    files already written, such as the envelope picture), and return the
+    front page's URL. Falls back to a local file:// URL if GITHUB_PAGES_URL isn't set.
     """
     import pathlib
-
-    # Save to current working directory as weekend.html
-    path = pathlib.Path.cwd() / "weekend.html"
-    path.write_text(html, encoding="utf-8")
-    print(f"  Newsletter saved: {path}")
-
-    publish_pages(["weekend.html", "events.html"])
-
-    # Return GitHub Pages URL if set, otherwise local file path. The ?v= stamp
-    # makes every issue a fresh URL so neither Pages' CDN (10-minute cache) nor
-    # a browser that opened last week's link can serve the old page.
+    for name, html in pages.items():
+        (pathlib.Path.cwd() / name).write_text(html, encoding="utf-8")
+    print(f"  Saved {len(pages)} pages: {', '.join(sorted(pages))}")
+    files = list(pages) + ([CHCO_CACHE_FILE] if os.path.exists(CHCO_CACHE_FILE) else []) + list(extra_files)
+    publish_pages(files)
+    # The ?v= stamp makes every issue a fresh URL so neither Pages' CDN (10-minute
+    # cache) nor a browser that opened last week's link can serve the old page.
     pages_url = os.environ.get("GITHUB_PAGES_URL")
     if pages_url:
         return f"{pages_url}?v={PAGES_VERSION}"
-    return f"file://{path}"
+    return f"file://{pathlib.Path.cwd() / dp.HOME_FILE}"
 
 
 # One stamp per run, appended to every Pages link this run sends out.
@@ -3932,20 +4539,52 @@ def publish_pages(files, attempts=3):
     raise RuntimeError("Could not push the new pages; not sending an email that links to stale ones")
 
 
-# The envelope is a photo (assets/envelope-placeholder.jpg: placeholder envelope photo; the
-# private copy used a custom envelope image) with the postmark's centre left blank.
-# Each issue stamps that Saturday's date into the postmark and the result is
-# attached to the email inline (cid:), so it shows without waiting on Pages.
+# The envelope is a photo (assets/envelope-placeholder.jpg: cream envelope, ZT wax
+# seal, pigeon stamp, on a walnut desk) with the postmark's centre left blank.
+# Each issue stamps that Saturday's date into the postmark. The picture is published with the pages
+# (assets/envelope/) and the email links to it; if that fails it is attached inline (cid:) instead.
 ENVELOPE_PHOTO = "assets/envelope-placeholder.jpg"
 POSTMARK_FONT = "assets/fonts/Jost-Regular.ttf"    # SIL OFL, see assets/fonts/Jost-OFL.txt
 POSTMARK_X, POSTMARK_MONTH_Y, POSTMARK_DAY_Y, POSTMARK_MAX_W = 809, 351, 370, 58
 POSTMARK_INK = (44, 40, 36)
 ENVELOPE_CID = "envelope-photo"
+# Which envelope email to send: "letter" (the pigeon peeks and the seal glints, then the seal cracks, the flap
+# lifts and the letter unfolds out of the envelope inside the GIF, which links to the dispatch) or "peek" (the
+# first half of that animation, with the letter's text in a card below). Set ENVELOPE_STYLE in the environment
+# to switch without editing code. A letter that fails to build falls back to "peek".
+ENVELOPE_STYLE = os.environ.get("ENVELOPE_STYLE", "letter")
 
 
 def build_envelope_photo(saturday):
     """Return JPEG bytes of the desk envelope with this Saturday's date in the postmark."""
     import io
+    from PIL import Image
+    buf = io.BytesIO()
+    envelope_base_image(saturday).save(buf, "JPEG", quality=86, optimize=True)
+    return buf.getvalue()
+
+
+def build_envelope_animation(saturday):
+    """Return animated GIF bytes of the same envelope (pigeon peeks, seal glints).
+    Frame 1 is the plain dated envelope, so mail apps that do not animate show it."""
+    return dm.build_envelope_gif(envelope_base_image(saturday))
+
+
+def build_envelope_image(saturday):
+    """
+    The (bytes, subtype) pair the email attaches: the animated GIF, or, if
+    building it ever fails, the still photo. The Saturday send must never be
+    held up by the animation.
+    """
+    try:
+        return build_envelope_animation(saturday), "gif"
+    except Exception as e:
+        print(f"  Animated envelope failed ({e}); using the still photo instead")
+        return build_envelope_photo(saturday), "jpeg"
+
+
+def envelope_base_image(saturday):
+    """The desk envelope as a PIL image with this Saturday's date in the postmark."""
     import numpy as np
     from PIL import Image, ImageDraw, ImageFont, ImageFilter
     base = Image.open(ENVELOPE_PHOTO).convert("RGB")
@@ -3966,9 +4605,12 @@ def build_envelope_photo(saturday):
     alpha = np.array(layer, dtype=float) / 255 * rng.uniform(0.8, 1.0, (base.size[1], base.size[0]))
     arr = np.array(base, dtype=float)
     arr = arr * (1 - alpha[..., None]) + np.array(POSTMARK_INK, dtype=float) * alpha[..., None]
-    buf = io.BytesIO()
-    Image.fromarray(arr.clip(0, 255).astype("uint8")).save(buf, "JPEG", quality=86, optimize=True)
-    return buf.getvalue()
+    return Image.fromarray(arr.clip(0, 255).astype("uint8"))
+
+
+ENVELOPE_BLURB = (
+    "Your full dispatch is ready &mdash; weather &amp; Biscuit walk windows, the Greenmarket verdict, what&rsquo;s on at Public Records, what&rsquo;s on sale this weekend, what&rsquo;s going on around Brooklyn, this week&rsquo;s nature report, bird, tree and street-tree map, and the Rockaway tides, then the MTA Weekender &mdash; this weekend&rsquo;s subway changes and three trips by train without a car &mdash; plus a separate News &amp; Culture page, from Fort Greene to the world."
+)  # HTML entities; shared by the email text, the letter GIF and its alt text
 
 
 def build_envelope_email(saturday, sunday, newsletter_url, photo_src=f"cid:{ENVELOPE_CID}"):
@@ -4143,7 +4785,7 @@ def build_envelope_email(saturday, sunday, newsletter_url, photo_src=f"cid:{ENVE
   <!-- Realistic envelope: single SVG. Flap folded back above body;
        side + bottom panels fold to center; pressed wax seal at junction. -->
   <div class="env-wrap">
-    <img class="env-photo" src="{photo_src}" width="620" height="393" alt="A cream envelope sealed with a wax seal, addressed to Alex Sample, with a Brooklyn pigeon stamp postmarked {saturday.strftime('%B %d')}, on a walnut desk">
+    <img class="env-photo" src="{photo_src}" width="620" height="393" alt="A cream envelope sealed with a sample wax seal, addressed to Alex Sample, with a Brooklyn pigeon stamp postmarked {saturday.strftime('%B %d')}, on a walnut desk">
   </div>
 
   <!-- Newsletter peek — always visible -->
@@ -4155,7 +4797,7 @@ def build_envelope_email(saturday, sunday, newsletter_url, photo_src=f"cid:{ENVE
     <div class="peek-title">The<br><em>Week</em>end.</div>
     <div class="peek-rule"></div>
     <div class="peek-section-label">{sat_day}, {sat_label} &mdash; {sun_label} &middot; {year}</div>
-    <p class="peek-text">Your full dispatch is ready &mdash; weather &amp; Biscuit walk windows, the Greenmarket verdict, what&rsquo;s on at Sample Hall, what&rsquo;s on sale this weekend, what&rsquo;s going on around Brooklyn, this week&rsquo;s bird, tree and street-tree map, and the Rockaway tides.</p>
+    <p class="peek-text">{ENVELOPE_BLURB}</p>
     <div class="cta-wrap">
       <a class="cta-btn" href="{newsletter_url}">&darr;&nbsp;&nbsp;Open Full Newsletter</a>
     </div>
@@ -4168,11 +4810,151 @@ def build_envelope_email(saturday, sunday, newsletter_url, photo_src=f"cid:{ENVE
     return html
 
 
-def send_email(html_body, saturday, images=None):
-    sender = "".join(os.environ["DISPATCH_EMAIL"].split())
-    password = "".join(os.environ["DISPATCH_APP_PASSWORD"].split())
-    recipient = "".join(os.environ["DISPATCH_TO"].split())
+def build_letter_email(saturday, sunday, newsletter_url, photo_src, size, alt):
+    """
+    The envelope email for ENVELOPE_STYLE "letter": the animated GIF is the whole message and links to the
+    dispatch; the letter's words are in its alt text (shown if images are blocked) and in a plain link below.
+    """
+    import html as _html
+    w, h = size
+    shown_h = round(620 * h / w)
+    year = saturday.year
+    url = _html.escape(newsletter_url, quote=True)
+    return f"""<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light only">
+<link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {{ color-scheme: light only; }}
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: #2A1E0A !important; margin: 0 !important; padding: 32px 16px !important;
+         font-family: 'Courier Prime', 'Courier New', monospace !important; -webkit-text-size-adjust: 100%; }}
+  .scene {{ max-width: 620px; margin: 0 auto; }}
+  .pre-label {{ font-size: 9px; letter-spacing: 0.3em; text-transform: uppercase; color: #6A5030; text-align: center; margin-bottom: 22px; }}
+  .env-link {{ display: block; text-decoration: none; }}
+  /* box-shadow on the img itself, not a filter on a wrapper (iOS Mail never repaints a filtered layer). The
+     colour and font here are what shows, on the dark page, if images are blocked and the alt text appears. */
+  .env-photo {{ width: 100% !important; height: auto !important; display: block !important; border: 0; border-radius: 4px;
+               box-shadow: 0 22px 38px rgba(40,28,10,0.42), 0 4px 10px rgba(40,28,10,0.3);
+               color: #F5EDD8; font-size: 13px; line-height: 1.7; }}
+  .open-line {{ text-align: center; margin-top: 20px; font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; }}
+  .open-line a {{ color: #D4B98A; text-decoration: underline; }}
+  .bottom-note {{ font-size: 8px; letter-spacing: 0.18em; text-transform: uppercase; color: #3A2A10; text-align: center; margin-top: 22px; }}
+  [data-ogsc] body {{ background: #2A1E0A !important; }}
+  @media (prefers-color-scheme: dark) {{ body {{ background: #2A1E0A !important; }} }}
+  a[x-apple-data-detectors] {{ color: inherit !important; text-decoration: none !important; font: inherit !important; }}
+</style>
+</head>
+<body>
+<div class="scene">
+  <div class="pre-label">Your weekend dispatch has arrived</div>
+  <a class="env-link" href="{url}" title="Open the full newsletter">
+    <img class="env-photo" src="{photo_src}" width="620" height="{shown_h}" alt="{_html.escape(alt, quote=True)}">
+  </a>
+  <p class="open-line"><a href="{url}">Open the full newsletter &rarr;</a></p>
+  <div class="bottom-note">Weekend Dispatch &middot; Fort Greene &middot; {year}</div>
+</div>
+</body>
+</html>"""
 
+
+ENVELOPE_HOST_DIR = "assets/envelope"    # each issue's envelope picture is published here, beside the pages
+
+
+def build_envelope_art(saturday, sunday, style=None):
+    """
+    Build the envelope picture: {"style", "data", "subtype", "size", "content"}. "letter" is the unfurling-letter
+    GIF; if it cannot be built, "peek" (the pigeon and the glint); if that cannot be built, the still photo.
+    The Saturday send always has something to send.
+    """
+    style = style or ENVELOPE_STYLE
+    if style == "letter":
+        try:
+            content = el.letter_content(saturday, sunday, ENVELOPE_BLURB)
+            gif, size = el.build_letter_gif(envelope_base_image(saturday), content)
+            return {"style": "letter", "data": gif, "subtype": "gif", "size": size, "content": content}
+        except Exception as e:
+            print(f"  Letter animation failed ({e}); using the peeking pigeon envelope instead")
+    data, subtype = build_envelope_image(saturday)
+    return {"style": "peek", "data": data, "subtype": subtype, "size": None, "content": None}
+
+
+def build_envelope_parts(saturday, sunday, newsletter_url, style=None, inline=False, hosted_url=None, art=None):
+    """
+    Everything the envelope email is made of: {"html", "images", "text", "style"}. images maps the
+    Content-ID to (bytes, subtype); text is the plain-text part (None to derive it from the HTML).
+
+    Where the picture lives: hosted_url puts a link to it in the email (nothing attached: the email is a few
+    kilobytes and the mail app loads the picture itself, so there is no "tap to download" placeholder);
+    inline=True embeds it as a data: URI (for previews that are a single file); otherwise it is attached.
+    art is a picture already built by build_envelope_art (so it can be published first).
+    """
+    import base64
+    art = art or build_envelope_art(saturday, sunday, style)
+    if hosted_url:
+        src = hosted_url
+    elif inline:
+        src = f"data:image/{art['subtype']};base64,{base64.b64encode(art['data']).decode()}"
+    else:
+        src = f"cid:{ENVELOPE_CID}"
+    attached = {} if (hosted_url or inline) else {ENVELOPE_CID: (art["data"], art["subtype"])}
+    if art["style"] == "letter":
+        text = el.letter_text(art["content"], newsletter_url)
+        html = build_letter_email(saturday, sunday, newsletter_url, src, art["size"], text)
+        return {"html": html, "images": attached, "text": text, "style": "letter"}
+    html = build_envelope_email(saturday, sunday, newsletter_url, photo_src=src)
+    return {"html": html, "images": attached, "text": None, "style": "peek"}
+
+
+def site_base_url():
+    """The folder the pages are served from (GITHUB_PAGES_URL without the page name), or "" when not publishing."""
+    u = os.environ.get("GITHUB_PAGES_URL", "")
+    return u.rsplit("/", 1)[0] if u else ""
+
+
+def write_envelope_file(art, saturday):
+    """Write the envelope picture into the repo folder it is served from; returns its path relative to the repo root."""
+    import pathlib
+    rel = f"{ENVELOPE_HOST_DIR}/{saturday.isoformat()}.{'jpg' if art['subtype'] == 'jpeg' else art['subtype']}"
+    path = pathlib.Path.cwd() / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(art["data"])
+    return rel
+
+
+def wait_until_live(url, expected_bytes, timeout=300, every=8):
+    """
+    Wait until the published picture can actually be fetched from the site (Pages takes a little while after a
+    push). Each check uses a throwaway query string, so the address the email will use is never requested early
+    and a "not found" answer can never be cached for it. True once the full file is being served.
+    """
+    import uuid
+    deadline = time.time() + timeout
+    while True:
+        try:
+            r = requests.get(f"{url}?cb={uuid.uuid4().hex[:10]}", timeout=30)
+            if r.status_code == 200 and r.headers.get("content-type", "").startswith("image/") and len(r.content) == expected_bytes:
+                return True
+        except requests.RequestException:
+            pass
+        if time.time() >= deadline:
+            return False
+        time.sleep(every)
+
+
+def build_email_message(html_body, saturday, sender, recipient, images=None, text=None):
+    """
+    Build the MIME message without sending it (send_email sends it; the preview
+    writes it to a .eml file you can open in a mail app).
+
+    images maps a Content-ID to the image bytes (a JPEG) or to a
+    (bytes, subtype) pair such as (gif_bytes, "gif").
+    """
     sat_label = saturday.strftime("%B %d")
     subject = f"Weekend Dispatch · {sat_label}"
 
@@ -4183,19 +4965,32 @@ def send_email(html_body, saturday, images=None):
     from email.mime.image import MIMEImage
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = formataddr(("The Dispatch Desk", sender))
+    msg["From"] = formataddr(("Sample Dispatch Desk", sender))
     msg["To"] = recipient
-    text = BeautifulSoup(html_body, "html.parser").get_text("\n", strip=True)
+    if text is None:
+        soup = BeautifulSoup(html_body, "html.parser")
+        for tag in soup(["style", "script", "head"]):    # the plain-text part should not hold the CSS
+            tag.decompose()
+        text = soup.get_text("\n", strip=True)
     msg.attach(MIMEText(text, "plain", "utf-8"))
     related = MIMEMultipart("related", type="text/html")
     related.attach(MIMEText(html_body, "html", "utf-8"))
-    for cid, data in (images or {}).items():
-        part = MIMEImage(data, "jpeg")
+    for cid, item in (images or {}).items():
+        data, subtype = item if isinstance(item, tuple) else (item, "jpeg")
+        part = MIMEImage(data, subtype)
         part.add_header("Content-ID", f"<{cid}>")
         part.add_header("X-Attachment-Id", cid)
-        part.add_header("Content-Disposition", "inline", filename=f"{cid}.jpg")
+        part.add_header("Content-Disposition", "inline", filename=f"{cid}.{'jpg' if subtype == 'jpeg' else subtype}")
         related.attach(part)
     msg.attach(related)
+    return msg
+
+
+def send_email(html_body, saturday, images=None, text=None):
+    sender = "".join(os.environ["DISPATCH_EMAIL"].split())
+    password = "".join(os.environ["DISPATCH_APP_PASSWORD"].split())
+    recipient = "".join(os.environ["DISPATCH_TO"].split())
+    msg = build_email_message(html_body, saturday, sender, recipient, images, text)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(sender, password)
@@ -4211,13 +5006,13 @@ def _placeholder_narrative():
     Stand-in for the Claude-written sections so --preview can render a full
     layout without an ANTHROPIC_API_KEY. Uses the exact section labels
     build_email_html parses (and one [SOURCE] block for Around Brooklyn). The
-    MTA and Sample Hall sections are unaffected — they are rendered from
+    MTA and Public Records sections are unaffected — they are rendered from
     live structured data, not this.
     """
     ph = "[Preview placeholder — set ANTHROPIC_API_KEY to generate this section.]"
     return (
         f"WEATHER + BISCUIT\n{ph}\n\n"
-        f"UNION SQUARE GREENMARKET\n{ph}\n\n"
+        f"SAMPLE GREENMARKET\n{ph}\n\n"
         f"AROUND BROOKLYN\n[Preview]\nPlaceholder headline — {ph}"
     )
 
@@ -4231,9 +5026,12 @@ def assemble_newsletter(client):
     `client` is an Anthropic client for the Claude-written sections (Weather,
     Greenmarket, Around Brooklyn). Pass None to fall back to placeholder
     text for just those sections so the layout still renders. The MTA and
-    Sample Hall sections are always built for real from live data.
+    Public Records sections are always built for real from live data.
 
-    Returns (newsletter_html, narrative, saturday, sunday).
+    Returns (pages, narrative, saturday, sunday, chco_issue): `pages` is
+    {filename: html}: the main page, the separate News & Culture page, the long
+    list, the subway System Changes page (when the MTA feed was readable and has
+    changes) and the Fort Greene Community News page when there is an issue.
     """
     # Determine weekend dates
     today = datetime.date.today()
@@ -4245,8 +5043,17 @@ def assemble_newsletter(client):
 
     # 1. Weather
     print("Fetching weather...")
-    weather_data = fetch_weekend_weather()
-    weekend = parse_weekend_days(weather_data)
+    weekend = {}
+    for attempt in (1, 2, 3):
+        try:
+            weekend = parse_weekend_days(fetch_weekend_weather())
+            break
+        except Exception as e:
+            print(f"  Weather attempt {attempt}/3 failed: {e}")
+            if attempt < 3:
+                time.sleep(4 * attempt)
+    if not weekend:
+        print("  Weather unavailable; carrying on without it")
     saturday_data = weekend.get("saturday", {})
     sunday_data = weekend.get("sunday", {})
 
@@ -4255,26 +5062,26 @@ def assemble_newsletter(client):
     sat_windows = get_walk_windows(saturday_data, "saturday") if saturday_data else []
     sun_windows = get_walk_windows(sunday_data, "sunday") if sunday_data else []
 
-    # 3. MTA — planned C/G service changes active this weekend (flat list)
+    # 3. MTA — planned A/C/3 service changes active this weekend (flat list)
     print("Fetching MTA alerts...")
     mta_alerts = fetch_mta_alerts(saturday, sunday)
-    print(f"  C/G weekend service changes: {len(mta_alerts)}")
+    print(f"  A/C/3 weekend service changes: {len(mta_alerts)}")
     surface_alerts = fetch_surface_transit_alerts()
     if surface_alerts:
         print(f"  Surface-transit disruptions: "
               f"{', '.join(sorted({a['service'] for a in surface_alerts}))}")
     else:
-        print("  No B38/B52/AirTrain/LIRR disruptions — services omitted")
+        print("  No B65/B43/AirTrain/LIRR disruptions — services omitted")
 
     # 4. Farmers market
     print("Fetching market data...")
     market_list = fetch_market_data()
     market_result = market_go_nogo(saturday_data, market_list)
 
-    # 5. Sample Hall events
-    print("Scraping Sample Hall events...")
-    pr_events = fetch_sample_hall_events()
-    print(f"  Sample Hall events found: {len(pr_events)}")
+    # 5. Public Records events
+    print("Scraping Public Records events...")
+    pr_events = fetch_public_records_events()
+    print(f"  Public Records events found: {len(pr_events)}")
 
     # 6. DICE — the watchlist drives the email, the wider sweep fills the
     #    companion page. The email covers tonight and the *following* Friday,
@@ -4306,6 +5113,14 @@ def assemble_newsletter(client):
     print(f"  Edible Brooklyn picks: "
           f"{', '.join(p['area'] + ': ' + p['title'] for p in edible_picks) or 'none'}")
 
+    # 7b. Fort Greene Community News — the CHCO's monthly paper, own page
+    print("Fetching Fort Greene Community News...")
+    chco_issue = fetch_chco_issue(today, client) if CHCO_ENABLED else None
+    if chco_issue:
+        print(f"  {chco_issue['month']} issue: {len(chco_issue['articles'])} stories, "
+              f"posted {chco_issue['posted']}")
+    chco_html = build_chco_html(chco_issue) if chco_issue else ""
+
     # 8. Narrative — Claude when we have a client, placeholder otherwise
     if client is not None:
         print("Generating narrative...")
@@ -4325,32 +5140,96 @@ def assemble_newsletter(client):
         print("No Anthropic client — using placeholder narrative sections...")
         narrative = _placeholder_narrative()
 
-    # 9. Companion page first — the email needs its URL to link to.
+    # 9. News & Culture: the extra sources behind the separate page, plus what the
+    #    main page needs to point at it (a headline strip and the Nature Report).
+    print("Fetching the News & Culture feeds...")
+    pool = dp.fetch_pool(today)
+    print(f"  Feeds answering: {sum(1 for v in pool.values() if v)} of {len(pool)}")
+    print("Fetching iNaturalist sightings...")
+    inat = dp.fetch_inat_report(today, LAT, LON)
+    if inat:
+        print(f"  {inat['observations']} verified observations of {inat['species']} species this week")
+    print("Fetching park/museum events and street permits...")
+    events = dp.fetch_jsonld_events(today)
+    permits = dp.fetch_permit_events(today)
+    print(f"  Events: {len(events)}; permits (Community Boards 8 & 9): {len(permits)}")
+    nature = build_nature_pieces(saturday)
+
+    # 9a. Culture listings: BAM's film schedule for the Around Brooklyn section (fails closed).
+    print("Fetching culture listings...")
+    cinema_films = cl.fetch_bam_films(saturday, sunday)
+    print(f"  Cinema listings: {len(cinema_films)}")
+    cinema_html = cl.build_culture_html(cinema_films, saturday)
+    bam_music = cl.fetch_bam_music(saturday, sunday)
+    print(f"  BAM music listings: {len(bam_music)}")
+    cinema_html += cl.build_bam_html(bam_music, saturday, "At BAM: music this weekend", cl.BAM_MUSIC_URL,
+                                     "The full BAM music schedule")
+    weekend_events = cl.fetch_weekend_events(saturday, sunday)
+    print(f"  Parks and museums this weekend: {len(weekend_events)}")
+    cinema_html += cl.build_events_html(weekend_events)
+    import ohreader as ohr
+    cinema_html += ohr.build_card_html(*ohr.fetch_latest_issue())  # Oh Reader link card; the magazine itself is not read
+    import your_block as yb
+    cinema_html += yb.build_block_html(yb.fetch_block_schedule())  # your block's DSNY days; address comes from the environment
+
+    # 9b. MTA Weekender: every planned subway change (for the System Changes page and
+    #     the section's summary) and three car-free trips from the hand-vetted library.
+    print("Building the MTA Weekender...")
+    subway_changes = mw.subway_changes(saturday, sunday)
+    print("  Planned subway changes this weekend: "
+          + ("feed unavailable" if subway_changes is None else str(len(subway_changes))))
+    trips = mw.pick_trips(mw.load_library(), saturday, saturday_data.get("rain_pct_max"))
+    print(f"  Trips: {', '.join(t['station'] + ' (' + t['railroad'] + ')' for t in trips) or 'none'}")
+    rail_notices = mw.rail_feeds(saturday, sunday)
+
+    # Links already on the main page; the News & Culture page never repeats them.
+    main_urls = set(re.findall(r'href="([^"]+)"', narrative))
+    for group in (edible_picks, pr_events, dice_picks):
+        main_urls |= {e["url"] for e in (group or []) if e.get("url")}
+
+    # 10. Build the pages. Links between them are relative, so they work on Pages
+    #     and from a local folder alike. The Community News link is deliberately
+    #     unversioned: it stays put until a new issue appears.
     print("Building the long list...")
     picked_urls = {p["url"] for p in dice_picks if p.get("url")}
     long_list_html = build_long_list_html(dice_watchlist, dice_sweep,
                                           saturday, friday, picked_urls)
+    q = f"?v={PAGES_VERSION}"
+    print("Building News & Culture...")
+    news_html, headlines, news_count = dp.build_news_culture({
+        "pool": pool, "events": events, "permits": permits, "chco_issue": chco_issue,
+        "chco_url": dp.CHCO_FILE if chco_html else "", "saturday": saturday, "sunday": sunday,
+        "main_urls": main_urls, "version": PAGES_VERSION,
+    })
+    print(f"  {news_count} items; {len(headlines)} headlines for the main page")
+    print("Building the main page...")
+    has_subway_page = bool(subway_changes)
+    weekender_html = mw.build_weekender_html(
+        subway_changes, trips, rail_notices, f"{mw.SUBWAY_FILE}{q}" if has_subway_page else "")
+    main_html = build_email_html(narrative, saturday_data, sunday_data, saturday, sunday,
+                                 mta_alerts, surface_alerts, pr_events, dice_picks,
+                                 f"events.html{q}", edible_picks,
+                                 headlines, f"{dp.NEWS_FILE}{q}", dp.render_inat(inat), nature,
+                                 weekender_html, around_extra_html=cinema_html)
+    pages = {dp.HOME_FILE: main_html, dp.NEWS_FILE: news_html, "events.html": long_list_html}
+    if has_subway_page:
+        pages[mw.SUBWAY_FILE] = mw.build_subway_page(
+            subway_changes, saturday, sunday,
+            datetime.datetime.now().strftime("%-d %B %Y, %-I:%M %p"), PAGES_VERSION)
+    if chco_html:
+        pages[dp.CHCO_FILE] = chco_html
+    return pages, narrative, saturday, sunday, chco_issue
 
-    # 10. Build newsletter HTML
-    print("Building newsletter...")
-    pages_url = os.environ.get("GITHUB_PAGES_URL")
-    long_list_url = (pages_url.rsplit("/", 1)[0] + f"/events.html?v={PAGES_VERSION}") if pages_url else ""
-    newsletter_html = build_email_html(narrative, saturday_data, sunday_data,
-                                       saturday, sunday, mta_alerts, surface_alerts,
-                                       pr_events, dice_picks, long_list_url,
-                                       edible_picks)
-    return newsletter_html, narrative, saturday, sunday, long_list_html
 
-
-def run_preview():
+def run_preview(site_dir="site_preview"):
     """
-    Local preview: build the full newsletter exactly as main() does — same
-    fetches, same section rendering — but write it to weekend_preview.html and
-    open it in the browser with `open`. Sends NO email and runs NO git commands.
+    Local preview: build the whole newspaper exactly as main() does (same
+    fetches, same rendering), write every page into `site_dir` and open the
+    front page in the browser with `open`. Sends NO email and runs NO git commands.
 
     Uses ANTHROPIC_API_KEY from the env for the Claude-written sections; if it
     is not set, those sections fall back to placeholder text so the layout
-    still renders. The MTA section always uses live data.
+    still renders.
     """
     import pathlib
     import subprocess
@@ -4365,20 +5244,50 @@ def run_preview():
         print("  ANTHROPIC_API_KEY not set — placeholder text for narrative sections")
         client = None
 
-    newsletter_html, _narrative, _saturday, _sunday, long_list_html = \
-        assemble_newsletter(client)
+    pages, _narrative, _saturday, _sunday, _issue = assemble_newsletter(client)
 
-    path = pathlib.Path.cwd() / "weekend_preview.html"
-    path.write_text(newsletter_html, encoding="utf-8")
-    print(f"  Wrote {path}")
+    out = pathlib.Path(site_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    for name, html in pages.items():
+        (out / name).write_text(html, encoding="utf-8")
+    print(f"  Wrote {len(pages)} pages to {out}/")
+    write_test_email(site_dir, _saturday, dp.HOME_FILE)
 
-    long_path = pathlib.Path.cwd() / "events_preview.html"
-    long_path.write_text(long_list_html, encoding="utf-8")
-    print(f"  Wrote {long_path}")
+    front = out / dp.HOME_FILE
+    subprocess.run(["open", str(front)], check=False)
+    print(f"✓ Preview opened in browser: {front}")
 
-    subprocess.run(["open", str(path)], check=False)
-    subprocess.run(["open", str(long_path)], check=False)
-    print(f"✓ Preview opened in browser: {path}")
+
+def write_test_email(out_dir="site_preview", saturday=None, link=None, style=None):
+    """
+    Build the envelope email exactly as the Saturday run does, but write it to
+    disk instead of sending it:
+
+      test-envelope.eml   the real MIME message (open it in Mail / Outlook / Thunderbird)
+      test-envelope.html  the same HTML, with the animated GIF as a file beside it
+      test-envelope.gif   the animation
+
+    style is "peek" or "letter" (default: ENVELOPE_STYLE). No network, no credentials,
+    nothing is sent. The addresses are placeholders.
+    """
+    import pathlib
+    saturday = saturday or (datetime.date.today() + datetime.timedelta(days=(5 - datetime.date.today().weekday()) % 7))
+    sunday = saturday + datetime.timedelta(days=1)
+    out = pathlib.Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    link = link or "https://your-username.github.io/weekend-dispatch/weekend.html"
+
+    parts = build_envelope_parts(saturday, sunday, link, style)
+    (data, subtype), = parts["images"].values()
+    msg = build_email_message(parts["html"], saturday, "desk@weekend-dispatch.invalid",
+                              "reader@weekend-dispatch.invalid", parts["images"], parts["text"])
+    (out / "test-envelope.eml").write_bytes(msg.as_bytes())
+    (out / f"test-envelope.{subtype}").write_bytes(data)
+    (out / "test-envelope.html").write_text(
+        parts["html"].replace(f"cid:{ENVELOPE_CID}", f"test-envelope.{subtype}"), encoding="utf-8")
+    print(f"  Test email ({parts['style']} style) written to {out}/test-envelope.eml "
+          f"({len(data) // 1024} KB {subtype.upper()}); nothing was sent")
+    return out / "test-envelope.eml"
 
 
 def main():
@@ -4394,24 +5303,39 @@ def main():
 
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
-    # Steps 1–10: fetch everything and build both pages
-    newsletter_html, narrative, saturday, sunday, long_list_html = \
-        assemble_newsletter(client)
+    # Steps 1–10: fetch everything and build every page
+    pages, narrative, saturday, sunday, _issue = assemble_newsletter(client)
 
-    # 11. Save + push to GitHub Pages. The long list is written first so it is
-    #     part of the same commit the newsletter push carries.
-    long_list_url = save_long_list_html(long_list_html)
-    print(f"  Long list: {long_list_url}")
-    newsletter_url = save_newsletter_html(newsletter_html, saturday)
-    print(f"  Newsletter saved: {newsletter_url}")
+    # 11. Build the envelope picture, then save + push to GitHub Pages: all pages, the Crown
+    #     Heights Community News cache and the envelope picture go up in one commit. The email
+    #     links to the published picture (a few kilobytes, nothing to download); if that cannot
+    #     be arranged it carries the picture as an attachment instead, as it used to.
+    print("Building the envelope picture...")
+    art = build_envelope_art(saturday, sunday)
+    base, hosted_rel = site_base_url(), None
+    if base:
+        try:
+            hosted_rel = write_envelope_file(art, saturday)
+        except Exception as e:
+            print(f"  Could not write the envelope picture for the site ({e}); it will be attached instead")
+    newsletter_url = save_site(pages, saturday, extra_files=[hosted_rel] if hosted_rel else [])
+    print(f"  Newspaper published: {newsletter_url}")
 
     # 12. Build envelope email + send
+    hosted_url = None
+    if hosted_rel:
+        live = f"{base}/{hosted_rel}"
+        print("Waiting for the envelope picture to be live on the site...")
+        if wait_until_live(live, len(art["data"])):
+            hosted_url = f"{live}?v={PAGES_VERSION}"
+        else:
+            print("  It was not live in time; attaching the picture to the email instead")
     print("Building envelope email...")
-    envelope_html = build_envelope_email(saturday, sunday, newsletter_url)
-    envelope_photo = build_envelope_photo(saturday)
+    parts = build_envelope_parts(saturday, sunday, newsletter_url, art=art, hosted_url=hosted_url)
+    print(f"  Envelope style: {parts['style']} ({'picture linked from the site' if hosted_url else 'picture attached'})")
 
     print("Sending...")
-    send_email(envelope_html, saturday, {ENVELOPE_CID: envelope_photo})
+    send_email(parts["html"], saturday, parts["images"], parts["text"])
 
     sat_label = saturday.strftime("%B %d")
     print(f"✓ Weekend Dispatch sent for {sat_label} – {sunday.strftime('%B %d')}")
@@ -4426,11 +5350,24 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fort Greene Weekend Dispatch")
     parser.add_argument(
         "--preview", action="store_true",
-        help="Build weekend_preview.html and open it locally — no email, no git."
+        help="Build every page into --site-dir and open the front page locally — no email, no git."
+    )
+    parser.add_argument("--site-dir", default="site_preview",
+                        help="Where --preview writes the pages (default: site_preview).")
+    parser.add_argument(
+        "--test-email", action="store_true",
+        help="Write only the envelope email to --site-dir as test-envelope.eml/.html/.gif — "
+             "no fetching, nothing sent."
+    )
+    parser.add_argument(
+        "--envelope-style", choices=["peek", "letter"], default=None,
+        help="Which envelope animation --test-email builds (default: ENVELOPE_STYLE, currently " + ENVELOPE_STYLE + ")."
     )
     args = parser.parse_args()
 
-    if args.preview:
-        run_preview()
+    if args.test_email:
+        write_test_email(args.site_dir, style=args.envelope_style)
+    elif args.preview:
+        run_preview(args.site_dir)
     else:
         main()
